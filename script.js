@@ -4,7 +4,7 @@ const CONFIG = {
   API_ENDPOINT: 'https://confined-space-api.firework202511.workers.dev',
   MAX_PDF_SIZE_MB: 10,
 };
-
+ 
 // 常用照片（存 R2，可跨次帶出）
 const PERSISTENT_KEYS = ['signage', 'license1', 'license2', 'rescue'];
  
@@ -695,31 +695,28 @@ function getFieldsForPhase(phase) {
 //   ③ 放置每個 canvas 前先算剩餘頁高是否足夠，不夠就 addPage
 //   → 每個元素都完整，永遠不會被分頁裁斷
 async function generatePDF(phase, items, store) {
-  const f        = getFieldsForPhase(phase);
-  const phLbl    = { before:'作業前', mid:'作業中', after:'作業後' }[phase];
-  const phColor  = { before:'#2952c8', mid:'#6d28d9', after:'#0d7490' }[phase];
-  const phBg     = { before:'#eef2fc', mid:'#f5f3ff', after:'#ecfeff' }[phase];
-  const TH = 'border:1px solid #cbd5e1;padding:8px 10px;background:#f8fafc;color:#334155;width:20%;vertical-align:top';
-  const TD = 'border:1px solid #cbd5e1;padding:8px 10px;vertical-align:top';
-  const RENDER_W = 780; // 渲染容器寬度（px）
+  const f       = getFieldsForPhase(phase);
+  const phLbl   = { before:'作業前', mid:'作業中', after:'作業後' }[phase];
+  const phColor = { before:'#2952c8', mid:'#6d28d9', after:'#0d7490' }[phase];
+  const phBg    = { before:'#eef2fc', mid:'#f5f3ff', after:'#ecfeff' }[phase];
+  const TH = 'border:1px solid #cbd5e1;padding:7px 9px;background:#f8fafc;color:#334155;width:20%;vertical-align:top;font-size:11px';
+  const TD = 'border:1px solid #cbd5e1;padding:7px 9px;vertical-align:top;font-size:11px';
  
-  // ── Step 1: 讀取所有圖片 ──────────────────────────────────────────
-  // R2 URL 沒有 CORS header → html2canvas 直接用 URL 會截出空白
-  // 解法：先用 fetch 把 R2 圖片讀成 base64 dataURL，再交給 html2canvas
+  // ── Step 1: 讀取圖片（File → dataURL；R2 URL → fetch → base64）──
   async function urlToBase64(url) {
     try {
       const res  = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload  = e => resolve(e.target.result);
-        reader.onerror = () => reject(new Error('FileReader 失敗'));
-        reader.readAsDataURL(blob);
+        const r = new FileReader();
+        r.onload  = e => resolve(e.target.result);
+        r.onerror = reject;
+        r.readAsDataURL(blob);
       });
     } catch(e) {
-      console.warn('R2 圖片讀取失敗，將顯示為空白:', url, e);
-      return null; // 讀取失敗時回傳 null，後續跳過該圖
+      console.warn('圖片讀取失敗:', url, e);
+      return null;
     }
   }
  
@@ -727,15 +724,13 @@ async function generatePDF(phase, items, store) {
   for (const item of items) {
     const files = (store[item.k] || []).filter(fi => fi.type && fi.type.startsWith('image/'));
     if (files.length > 0) {
-      // 本次新上傳的圖片：直接讀成 dataURL
       imgMap[item.k] = await Promise.all(files.map(fileToDataUrl));
     } else if (phase === 'before' && item.persistent) {
-      // 常用照片：優先用記憶體緩存（本次壓縮的 base64），其次 fetch R2 URL
       if (S.persistentB64[item.k]) {
-        imgMap[item.k] = [S.persistentB64[item.k]]; // 直接用緩存，100% 無 CORS 問題
+        imgMap[item.k] = [S.persistentB64[item.k]];
       } else if (S.persistentUrls[item.k]) {
         const b64 = await urlToBase64(S.persistentUrls[item.k]);
-        if (b64) S.persistentB64[item.k] = b64;     // 成功 fetch 後也緩存
+        if (b64) S.persistentB64[item.k] = b64;
         imgMap[item.k] = b64 ? [b64] : [];
       } else {
         imgMap[item.k] = [];
@@ -745,37 +740,53 @@ async function generatePDF(phase, items, store) {
     }
   }
  
-  // ── 工具：將 DOM 元素截圖為 canvas ────────────────────────────────
-  async function domToCanvas(el) {
-    return html2canvas(el, {
-      scale: 2, useCORS: true, allowTaint: true,
-      backgroundColor: '#ffffff', logging: false
-    });
+  // ── Step 2: 整頁渲染（一個大 container → 一次 html2canvas）────────
+  // 改回整頁截圖，但分頁時精確避開圖片邊界
+  // 每張圖片前插入 data-pagebreak 標記，讓分頁邏輯參考
+ 
+  let photoHTML = '';
+  for (const item of items) {
+    const srcs = imgMap[item.k] || [];
+    if (srcs.length === 0) {
+      // 無圖片：顯示空格子（含標籤）
+      photoHTML += `
+        <div data-item="${item.k}" style="border:1px solid #ddd;padding:10px;margin-bottom:10px;background:#f9f9f9;text-align:center;min-height:60px;display:flex;align-items:center;justify-content:center;flex-direction:column">
+          <div style="color:#aaa;font-size:11px;margin-bottom:4px">（未上傳）</div>
+          <div style="font-size:11px;font-weight:bold;color:#555">${item.label}</div>
+        </div>`;
+    } else {
+      for (const src of srcs) {
+        photoHTML += `
+          <div data-item="${item.k}" style="border:1px solid #ddd;padding:8px;margin-bottom:10px;background:#fff;text-align:center">
+            <img src="${src}" style="max-width:100%;height:auto;display:block;margin:0 auto">
+            <div style="font-size:11px;font-weight:bold;margin-top:6px;color:#334155">${item.label}</div>
+          </div>`;
+      }
+    }
   }
  
-  // ── 工具：臨時掛載隱藏元素 ────────────────────────────────────────
-  function mountHidden(el) {
-    el.style.cssText += `position:fixed;left:-9999px;top:0;width:${RENDER_W}px;box-sizing:border-box;background:#fff;`;
-    document.body.appendChild(el);
-    return el;
-  }
-  function unmount(el) { document.body.removeChild(el); }
+  const container = document.createElement('div');
+  container.style.cssText = [
+    'position:fixed', 'left:-9999px', 'top:0',
+    'width:750px',
+    'background:#fff',
+    'padding:30px 36px',
+    'font-family:Arial,sans-serif',
+    'font-size:12px',
+    'line-height:1.5',
+    'color:#111',
+    'box-sizing:border-box'
+  ].join(';');
  
-  // ── Step 2: 截圖基本資料表頭 ─────────────────────────────────────
-  const headerEl = document.createElement('div');
-  headerEl.style.fontFamily = 'Arial, sans-serif';
-  headerEl.style.fontSize   = '13px';
-  headerEl.style.lineHeight = '1.6';
-  headerEl.style.color      = '#111';
-  headerEl.innerHTML = `
-    <div style="text-align:center;margin-bottom:20px;border-bottom:3px solid ${phColor};padding-bottom:12px">
+  container.innerHTML = `
+    <div style="text-align:center;margin-bottom:18px;border-bottom:3px solid ${phColor};padding-bottom:12px">
       <h1 style="margin:0;color:#1d3d9e;font-size:20px">局限空間作業通報書</h1>
       <div style="font-size:11px;color:#555;margin-top:3px">Confined Space Work Notification Report</div>
       <span style="display:inline-block;margin-top:6px;padding:2px 12px;border-radius:20px;font-size:11px;font-weight:700;background:${phBg};color:${phColor};border:1px solid ${phColor}">📌 ${phLbl}通報</span>
     </div>
-    <div style="text-align:right;font-size:10px;color:#888;margin-bottom:10px">產出時間：${new Date().toLocaleString('zh-TW', { timeZone:'Asia/Taipei' })}</div>
+    <div style="text-align:right;font-size:10px;color:#888;margin-bottom:10px">產出時間：${new Date().toLocaleString('zh-TW',{timeZone:'Asia/Taipei'})}</div>
     <div style="background:#eef2fc;font-weight:bold;color:#2952c8;padding:6px 10px;margin-bottom:6px;border-left:4px solid #2952c8;font-size:12px">基本資料</div>
-    <table style="width:100%;border-collapse:collapse;margin-bottom:8px;font-size:11px">
+    <table style="width:100%;border-collapse:collapse;margin-bottom:14px">
       <tr><th style="${TH}">承攬商公司</th><td style="${TD}">${f.company||'—'}</td><th style="${TH}">工程名稱</th><td style="${TD}">${f.project||'—'}</td></tr>
       <tr><th style="${TH}">主辦部門</th><td style="${TD}">${f.dept||'—'}</td><th style="${TH}">主辦課別</th><td style="${TD}">${f.section||'—'}</td></tr>
       <tr><th style="${TH}">檢驗員</th><td style="${TD}">${f.inspector||'—'}</td><th style="${TH}">缺氧作業主管</th><td style="${TD}">${f.oxygenSupervisor||'—'}</td></tr>
@@ -783,77 +794,102 @@ async function generatePDF(phase, items, store) {
       <tr><th style="${TH}">開始時間</th><td style="${TD}">${(f.startTime||'').replace('T',' ')}</td><th style="${TH}">結束時間</th><td style="${TD}">${(f.endTime||'').replace('T',' ')}</td></tr>
       <tr><th style="${TH}">作業區域</th><td style="${TD}">${f.workArea||'—'}</td><th style="${TH}">詳細位置</th><td style="${TD}">${f.workDetail||'—'}</td></tr>
     </table>
-    <div style="background:#eef2fc;font-weight:bold;color:#2952c8;padding:6px 10px;border-left:4px solid #2952c8;font-size:12px">查核照片與附件（${phLbl}）</div>`;
-  mountHidden(headerEl);
-  const headerCanvas = await domToCanvas(headerEl);
-  unmount(headerEl);
+    <div style="background:#eef2fc;font-weight:bold;color:#2952c8;padding:6px 10px;margin-bottom:10px;border-left:4px solid #2952c8;font-size:12px">查核照片與附件（${phLbl}）</div>
+    ${photoHTML}`;
  
-  // ── Step 3: 每張照片各自截圖（含標籤）────────────────────────────
-  // 每個格子：一張圖 + 標籤文字，自適應高度
-  const photoCanvases = []; // [{ canvas, label }]
-  for (const item of items) {
-    const srcs = imgMap[item.k] || [];
-    for (const src of srcs) {
-      const cell = document.createElement('div');
-      cell.style.fontFamily  = 'Arial, sans-serif';
-      cell.style.fontSize    = '12px';
-      cell.style.textAlign   = 'center';
-      cell.style.padding     = '8px';
-      cell.style.border      = '1px solid #ddd';
-      cell.style.background  = '#fff';
-      cell.innerHTML = `
-        <img src="${src}" crossorigin="anonymous"
-             style="max-width:100%;height:auto;display:block;margin:0 auto">
-        <div style="font-weight:bold;margin-top:6px;color:#334155">${item.label}</div>`;
-      mountHidden(cell);
-      const c = await domToCanvas(cell);
-      unmount(cell);
-      photoCanvases.push(c);
-    }
-  }
+  document.body.appendChild(container);
  
-  // ── Step 4: 組合 PDF（逐塊放置，圖片不跨頁）─────────────────────
+  // 讓圖片完整載入再截圖
+  await Promise.all(
+    Array.from(container.querySelectorAll('img')).map(img =>
+      img.complete ? Promise.resolve() :
+      new Promise(res => { img.onload = img.onerror = res; })
+    )
+  );
+ 
+  const canvas = await html2canvas(container, {
+    scale: 2,
+    useCORS: true,
+    allowTaint: true,
+    backgroundColor: '#ffffff',
+    logging: false,
+    windowWidth: 750,
+  });
+  document.body.removeChild(container);
+ 
+  // ── Step 3: 智慧分頁（找到每個 data-item 的 Y 位置，換頁時跳過圖片）─
+  // 原理：在截圖前，記錄每個 data-item div 的 offsetTop（相對於 container）
+  // 分頁時：若切割點落在某個 div 內部 → 提前在該 div 開始處換頁
+ 
+  // 重新掛載 container（只為了量 offsetTop，不截圖）
+  const measure = container.cloneNode(true);
+  measure.style.cssText = 'position:fixed;left:-9999px;top:0;width:750px;visibility:hidden;padding:30px 36px;box-sizing:border-box;font-family:Arial,sans-serif;';
+  document.body.appendChild(measure);
+ 
+  // 收集每個 [data-item] 的 offsetTop 和 offsetHeight（CSS px）
+  const blockBounds = Array.from(measure.querySelectorAll('[data-item]')).map(el => ({
+    top:    el.offsetTop,
+    bottom: el.offsetTop + el.offsetHeight,
+  }));
+  document.body.removeChild(measure);
+ 
+  // ── Step 4: 產生 PDF（以圖片邊界為基礎分頁）───────────────────────
   const { jsPDF } = window.jspdf;
-  const pdf   = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
-  const A4_W  = 210;
-  const A4_H  = 297;
-  const MARGIN = 10; // mm 上下左右邊距
-  const CONTENT_W = A4_W - MARGIN * 2;
-  const CONTENT_H = A4_H - MARGIN * 2;
-  const SCALE     = RENDER_W / 2; // canvas scale:2，CSS px = canvas.width / 2
+  const pdf     = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+  const A4_W    = 210, A4_H = 297, MARGIN = 10;
+  const cssW    = canvas.width  / 2;   // CSS px（scale:2）
+  const cssH    = canvas.height / 2;
+  const mmPerPx = (A4_W - MARGIN * 2) / cssW;   // mm / CSS px
+  const pageHpx = (A4_H - MARGIN * 2) / mmPerPx; // 每頁可容納的 CSS px 高度
  
-  let curY = MARGIN; // 目前在 PDF 上的 Y 位置（mm）
- 
-  // 放置一個 canvas 到 PDF，若空間不足先換頁
-  function placeCanvas(c, gapBefore = 3) {
-    const cssW  = c.width  / 2; // CSS px
-    const cssH  = c.height / 2;
-    const mmW   = CONTENT_W;
-    const mmH   = cssH * (CONTENT_W / cssW); // 按比例換算 mm 高度
- 
-    // 換頁判斷：若放下去會超出頁面
-    if (curY + gapBefore + mmH > A4_H - MARGIN) {
-      pdf.addPage();
-      curY = MARGIN;
-    } else {
-      curY += gapBefore;
+  // 計算「安全切割點」：pageHpx 的整數倍，但要往前退到 block 邊界
+  function safeCutY(idealY) {
+    // 找出哪個 block 包含了 idealY
+    for (const b of blockBounds) {
+      if (idealY > b.top && idealY < b.bottom) {
+        // idealY 在某個 block 內部 → 往前退到 block.top
+        return b.top > 0 ? b.top - 2 : 0;
+      }
     }
- 
-    pdf.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', MARGIN, curY, mmW, mmH);
-    curY += mmH;
+    return idealY; // 不在任何 block 內 → 直接切
   }
  
-  // 放表頭
-  placeCanvas(headerCanvas, 0);
+  let cutPoints = [0];
+  let y = 0;
+  while (y + pageHpx < cssH) {
+    const ideal = y + pageHpx;
+    const safe  = safeCutY(ideal);
+    cutPoints.push(safe);
+    y = safe;
+  }
+  cutPoints.push(cssH);
  
-  // 兩欄放照片：先收集本行兩張，合成後放入
-  // 為了不讓兩欄圖片被分到不同頁，改為單欄排列（更安全，圖片也更清晰）
-  for (const c of photoCanvases) {
-    placeCanvas(c, 4);
+  for (let i = 0; i < cutPoints.length - 1; i++) {
+    if (i > 0) pdf.addPage();
+    const sliceTopPx = cutPoints[i];
+    const sliceBotPx = cutPoints[i + 1];
+    const slicePxH   = sliceBotPx - sliceTopPx;
+    if (slicePxH <= 0) continue;
+ 
+    const tmp = document.createElement('canvas');
+    tmp.width  = canvas.width;
+    tmp.height = Math.ceil(slicePxH * 2);
+    tmp.getContext('2d').drawImage(
+      canvas,
+      0, Math.round(sliceTopPx * 2),
+      canvas.width, tmp.height,
+      0, 0,
+      canvas.width, tmp.height
+    );
+ 
+    const mmH = slicePxH * mmPerPx;
+    pdf.addImage(tmp.toDataURL('image/jpeg', 0.92), 'JPEG',
+      MARGIN, MARGIN, A4_W - MARGIN * 2, mmH);
   }
  
   return pdf.output('datauristring').split(',')[1];
 }
+ 
  
 function fileToDataUrl(file) {
   return new Promise(res => {
@@ -948,3 +984,4 @@ if (document.readyState === 'loading') {
 } else {
   initApp();
 }
+ 
