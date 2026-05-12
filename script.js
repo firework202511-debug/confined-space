@@ -1,7 +1,7 @@
 // ================== 全域設定 ==================
 const CONFIG = {
   // ⚠️ 重要：改成你的 Worker 網址
-  API_ENDPOINT: 'https://confined-space-api.your-subdomain.workers.dev',
+  API_ENDPOINT: 'https://confined-space-api.firework202511.workers.dev',
   MAX_PDF_SIZE_MB: 10,
 };
 
