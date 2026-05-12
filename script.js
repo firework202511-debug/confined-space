@@ -4,7 +4,7 @@ const CONFIG = {
   API_ENDPOINT: 'https://confined-space-api.firework202511.workers.dev',
   MAX_PDF_SIZE_MB: 10,
 };
- 
+
 // 常用照片（存 R2，可跨次帶出）
 const PERSISTENT_KEYS = ['signage', 'license1', 'license2', 'rescue'];
  
@@ -44,6 +44,7 @@ const S = {
   G_PDF_B64: '',         // 最後一次產生的 PDF base64
   lastBeforeRecord: null, // 上次作業前記錄（自動帶入用）
   persistentUrls: {},    // 常用照片的現有 R2 URL { signage, license1, license2, rescue }
+  persistentB64:  {},    // 常用照片的 base64（本次上傳或 fetch 後緩存，優先用於 PDF）
 };
  
 // ================== 初始化 ==================
@@ -490,6 +491,7 @@ function rmFile(k, i, phase) {
  
 // ================== 常用照片帶入預覽 ==================
 // 從 R2 URL 帶入常用照片的縮圖預覽（不需重新上傳就能使用）
+// 同時在背景 fetch 成 base64 緩存，避免 PDF 生成時的 CORS 問題
 function loadPersistentPreviews(photoUrls) {
   PERSISTENT_KEYS.forEach(k => {
     const url = photoUrls[k];
@@ -501,8 +503,22 @@ function loadPersistentPreviews(photoUrls) {
     // 若使用者已自行上傳新圖，不覆蓋
     if (S.files[k] && S.files[k].length > 0) return;
  
-    // 標記此格為「使用既有 R2 圖片」（非 File 物件，是 URL 字串）
+    // 標記此格為「使用既有 R2 圖片」
     if (!S.persistentUrls[k]) S.persistentUrls[k] = url;
+ 
+    // ★ 背景 fetch 成 base64 緩存，PDF 生成時直接用（無 CORS 問題）
+    if (!S.persistentB64[k]) {
+      fetch(url)
+        .then(r => r.ok ? r.blob() : Promise.reject(r.status))
+        .then(blob => new Promise((res, rej) => {
+          const reader = new FileReader();
+          reader.onload  = e => res(e.target.result);
+          reader.onerror = rej;
+          reader.readAsDataURL(blob);
+        }))
+        .then(b64 => { S.persistentB64[k] = b64; })
+        .catch(e => console.warn(`預載 ${k} 失敗:`, e));
+    }
  
     pvEl.innerHTML = `
       <div style="position:relative;border-radius:6px;overflow:hidden;border:2px solid #0f7b5a;">
@@ -592,10 +608,12 @@ async function generateAndSubmit(phase) {
       const persistentPayload = {};
       for (const k of PERSISTENT_KEYS) {
         if (S.files[k] && S.files[k].length > 0) {
-          // 有新圖片 → 壓縮後上傳
-          persistentPayload[k] = await compressImage(S.files[k][0]);
+          // 有新圖片 → 壓縮後上傳，並緩存 base64 供本次 PDF 使用
+          const b64 = await compressImage(S.files[k][0]);
+          persistentPayload[k] = b64;
+          S.persistentB64[k]   = 'data:image/jpeg;base64,' + b64; // 緩存完整 dataURL
         } else {
-          // 沿用既有 R2 圖片 → 傳 null，Worker 直接回傳現有 URL
+          // 沿用既有 R2 圖片 → 傳 null
           persistentPayload[k] = null;
         }
       }
@@ -686,13 +704,42 @@ async function generatePDF(phase, items, store) {
   const RENDER_W = 780; // 渲染容器寬度（px）
  
   // ── Step 1: 讀取所有圖片 ──────────────────────────────────────────
+  // R2 URL 沒有 CORS header → html2canvas 直接用 URL 會截出空白
+  // 解法：先用 fetch 把 R2 圖片讀成 base64 dataURL，再交給 html2canvas
+  async function urlToBase64(url) {
+    try {
+      const res  = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = e => resolve(e.target.result);
+        reader.onerror = () => reject(new Error('FileReader 失敗'));
+        reader.readAsDataURL(blob);
+      });
+    } catch(e) {
+      console.warn('R2 圖片讀取失敗，將顯示為空白:', url, e);
+      return null; // 讀取失敗時回傳 null，後續跳過該圖
+    }
+  }
+ 
   const imgMap = {};
   for (const item of items) {
     const files = (store[item.k] || []).filter(fi => fi.type && fi.type.startsWith('image/'));
     if (files.length > 0) {
+      // 本次新上傳的圖片：直接讀成 dataURL
       imgMap[item.k] = await Promise.all(files.map(fileToDataUrl));
-    } else if (phase === 'before' && item.persistent && S.persistentUrls[item.k]) {
-      imgMap[item.k] = [S.persistentUrls[item.k]];
+    } else if (phase === 'before' && item.persistent) {
+      // 常用照片：優先用記憶體緩存（本次壓縮的 base64），其次 fetch R2 URL
+      if (S.persistentB64[item.k]) {
+        imgMap[item.k] = [S.persistentB64[item.k]]; // 直接用緩存，100% 無 CORS 問題
+      } else if (S.persistentUrls[item.k]) {
+        const b64 = await urlToBase64(S.persistentUrls[item.k]);
+        if (b64) S.persistentB64[item.k] = b64;     // 成功 fetch 後也緩存
+        imgMap[item.k] = b64 ? [b64] : [];
+      } else {
+        imgMap[item.k] = [];
+      }
     } else {
       imgMap[item.k] = [];
     }
@@ -901,4 +948,3 @@ if (document.readyState === 'loading') {
 } else {
   initApp();
 }
- 
