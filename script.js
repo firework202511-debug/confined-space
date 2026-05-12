@@ -7,7 +7,7 @@ const CONFIG = {
 
 // 常用照片（存 R2，可跨次帶出）
 const PERSISTENT_KEYS = ['signage', 'license1', 'license2', 'rescue'];
-
+ 
 // 上傳項目定義
 const UPLOAD_ITEMS = {
   before: [
@@ -31,7 +31,7 @@ const UPLOAD_ITEMS = {
     { k: 'site_end',     label: '現場結束後狀況' },
   ],
 };
-
+ 
 // 全域狀態
 const S = {
   dd: [],                // dropdown data
@@ -45,7 +45,7 @@ const S = {
   lastBeforeRecord: null, // 上次作業前記錄（自動帶入用）
   persistentUrls: {},    // 常用照片的現有 R2 URL { signage, license1, license2, rescue }
 };
-
+ 
 // ================== 初始化 ==================
 async function initApp() {
   try {
@@ -65,67 +65,115 @@ async function initApp() {
   buildUploadGrid('mid');
   buildUploadGrid('after');
 }
-
+ 
 function getTodayDateString() {
   return new Date().toLocaleDateString('zh-TW', {
     timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit'
   }).replace(/\//g, '-');
 }
-
+ 
 // ================== 下拉選單 ==================
 function fillAllCompanySelects() {
   const cos = [...new Set(S.dd.map(r => r.company))].sort();
-  ['beforeCompany', 'midCompany', 'afterCompany', 'queryCompany'].forEach(id => {
+ 
+  // 作業前/中/後：加「其他」選項；查詢頁不加
+  ['beforeCompany', 'midCompany', 'afterCompany'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    const keepFirst = el.options[0]?.value === '' ? el.options[0].text : '— 全部 —';
-    el.innerHTML = `<option value="">${keepFirst}</option>`;
+    el.innerHTML = '<option value="">— 請選擇公司 —</option>';
     cos.forEach(c => el.add(new Option(c, c)));
+    el.add(new Option('其他（手動輸入）', '__other__'));
   });
+ 
+  // 查詢頁：只列公司，不加「其他」
+  const qEl = document.getElementById('queryCompany');
+  if (qEl) {
+    qEl.innerHTML = '<option value="">— 全部 —</option>';
+    cos.forEach(c => qEl.add(new Option(c, c)));
+  }
 }
-
+ 
 function onCompanyChange(phase) {
-  const co   = document.getElementById(phase + 'Company').value;
+  const co    = document.getElementById(phase + 'Company').value;
   const prjEl = document.getElementById(phase + 'Project');
+ 
+  // ── 處理「其他」：顯示手動輸入區 ──────────────────
+  if (phase === 'before') {
+    const manualBox = document.getElementById('beforeManualBox');
+    if (manualBox) manualBox.style.display = (co === '__other__') ? 'block' : 'none';
+    if (co === '__other__') {
+      prjEl.innerHTML = '<option value="">—</option>';
+      prjEl.disabled = true;
+      document.getElementById('beforeDept').value    = '';
+      document.getElementById('beforeSection').value = '';
+      updateProceedBtn('before');
+      return;
+    }
+  }
+ 
   prjEl.innerHTML = '<option value="">請選擇工程</option>';
-  prjEl.disabled = !co;
-
+  prjEl.disabled  = !co;
   if (!co) return;
+ 
   const projs = [...new Set(S.dd.filter(r => r.company === co).map(r => r.project))].sort();
   projs.forEach(p => prjEl.add(new Option(p, p)));
-
-  // 同步帶入部門課別（僅作業前）
+  prjEl.add(new Option('其他（手動輸入）', '__other__'));
+ 
+  // 作業前：同步部門課別
   if (phase === 'before') {
-    const match = S.dd.find(r => r.company === co);
-    document.getElementById('beforeDept').value    = match?.dept    || '';
-    document.getElementById('beforeSection').value = match?.section || '';
+    document.getElementById('beforeDept').value    = '';
+    document.getElementById('beforeSection').value = '';
     updateProceedBtn('before');
   }
-
-  // 作業中/後: 工程選好後自動查詢
+ 
+  // 工程選好後的處理
   prjEl.onchange = () => {
-    if (phase === 'mid' || phase === 'after') fetchBeforeRecord(phase);
+    const prj = prjEl.value;
+ 
+    // 處理工程「其他」
     if (phase === 'before') {
-      const m = S.dd.find(r => r.company === co && r.project === prjEl.value);
+      const manualBox = document.getElementById('beforeManualBox');
+      if (manualBox) manualBox.style.display = (prj === '__other__') ? 'block' : 'none';
+      if (prj === '__other__') {
+        document.getElementById('beforeDept').value    = '';
+        document.getElementById('beforeSection').value = '';
+        updateProceedBtn('before');
+        return;
+      }
+      const m = S.dd.find(r => r.company === co && r.project === prj);
       document.getElementById('beforeDept').value    = m?.dept    || '';
       document.getElementById('beforeSection').value = m?.section || '';
-      // ★ 自動帶入上次作業前記錄
-      fetchLastBeforeRecord(co, prjEl.value);
+      fetchLastBeforeRecord(co, prj);
+      updateProceedBtn('before');
     }
+    if (phase === 'mid' || phase === 'after') fetchBeforeRecord(phase);
   };
 }
-
+ 
 function updateProceedBtn(phase) {
-  // 作業前「下一步」只在公司+工程+必填都填好後才可點
-  const co  = document.getElementById('beforeCompany').value;
-  const prj = document.getElementById('beforeProject').value;
-  document.getElementById('btnBeforeNext').disabled = !(co && prj);
+  const coSel  = document.getElementById('beforeCompany').value;
+  const prjSel = document.getElementById('beforeProject').value;
+ 
+  let hasCompany, hasProject;
+  if (coSel === '__other__') {
+    // 手動輸入：讀手動欄位
+    hasCompany  = document.getElementById('manualCompany')?.value.trim();
+    hasProject  = document.getElementById('manualProject')?.value.trim();
+  } else if (prjSel === '__other__') {
+    hasCompany  = !!coSel;
+    hasProject  = document.getElementById('manualProject')?.value.trim();
+  } else {
+    hasCompany  = !!coSel;
+    hasProject  = !!prjSel;
+  }
+ 
+  document.getElementById('btnBeforeNext').disabled = !(hasCompany && hasProject);
 }
-
+ 
 // ================== 自動帶入上次作業前記錄 ==================
 async function fetchLastBeforeRecord(company, project) {
   if (!company || !project) return;
-
+ 
   // 顯示查詢中提示
   const hintEl = document.getElementById('beforeLastHint');
   if (hintEl) {
@@ -133,14 +181,14 @@ async function fetchLastBeforeRecord(company, project) {
     hintEl.style.color = '#2952c8';
     hintEl.style.display = 'block';
   }
-
+ 
   try {
     const url = new URL(`${CONFIG.API_ENDPOINT}/api/get-last-before`);
     url.searchParams.set('company', company);
     url.searchParams.set('project', project);
     const res  = await fetch(url);
     const data = await res.json();
-
+ 
     if (!data.found || !data.record) {
       S.lastBeforeRecord = null;
       if (hintEl) {
@@ -149,17 +197,17 @@ async function fetchLastBeforeRecord(company, project) {
       }
       return;
     }
-
+ 
     const rec = data.record;
     S.lastBeforeRecord = rec;
-
+ 
     // 帶入欄位（保留可編輯）
     setVal('beforeInspector', rec.inspector);
     setVal('beforeOxygen',    rec.oxygenSupervisor);
     setVal('beforePhone',     rec.phone);
     setVal('beforeArea',      rec.workArea);
     setVal('beforeDetail',    rec.workDetail);
-
+ 
     // ★ 帶入常用照片預覽
     if (rec.persistentPhotos) {
       S.persistentUrls = rec.persistentPhotos;
@@ -184,13 +232,13 @@ async function fetchLastBeforeRecord(company, project) {
       }).replace(/\//g, '-');
       if (timePart) setVal('beforeEnd', `${todayStr}T${timePart}`);
     }
-
+ 
     if (hintEl) {
       const lastDate = (rec.uploadTime || rec.startTime || '').slice(0, 10);
       hintEl.innerHTML = `✅ 已帶入上次記錄（${lastDate}），可直接修改各欄位`;
       hintEl.style.color = '#0f7b5a';
     }
-
+ 
   } catch (err) {
     console.warn('fetchLastBeforeRecord 失敗:', err);
     S.lastBeforeRecord = null;
@@ -200,14 +248,14 @@ async function fetchLastBeforeRecord(company, project) {
     }
   }
 }
-
+ 
 function setVal(id, val) {
   const el = document.getElementById(id);
   if (el && val !== undefined && val !== null) el.value = val;
 }
-
+ 
 // ================== 子頁面切換 ==================
-function goToUpload(phase) {
+async function goToUpload(phase) {
   // 驗證必填
   const inspector = val('beforeInspector');
   const oxygen    = val('beforeOxygen');
@@ -216,23 +264,49 @@ function goToUpload(phase) {
   const end       = val('beforeEnd');
   const area      = val('beforeArea');
   const detail    = val('beforeDetail');
-
+ 
   if (!inspector || !oxygen || !phone || !start || !end || !area || !detail) {
     alert('請填寫所有必填欄位（姓名、主管、聯絡方式、時間、地點）');
     return;
   }
-
+ 
+  // 讀取公司/工程（含「其他」手動輸入）
+  const coSel  = val('beforeCompany');
+  const prjSel = val('beforeProject');
+  const company = (coSel  === '__other__') ? val('manualCompany')  : coSel;
+  const project = (prjSel === '__other__') ? val('manualProject')  : prjSel;
+  const dept    = (coSel  === '__other__') ? val('manualDept')     : val('beforeDept');
+  const section = (coSel  === '__other__') ? val('manualSection')  : val('beforeSection');
+ 
+  if (!company || !project) {
+    alert('請填寫公司名稱與工程名稱');
+    return;
+  }
+ 
+  // 若手動輸入，自動存入 DROPDOWNDATA
+  if (coSel === '__other__' || prjSel === '__other__') {
+    try {
+      await fetch(`${CONFIG.API_ENDPOINT}/api/add-dropdown`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company, project, dept, section })
+      });
+      // 同步更新本地 dd
+      if (!S.dd.some(r => r.company === company && r.project === project)) {
+        S.dd.push({ company, project, dept, section });
+        fillAllCompanySelects();
+      }
+    } catch(e) { console.warn('更新 DROPDOWNDATA 失敗:', e); }
+  }
+ 
   // 儲存到全域（供 PDF 及作業中/後使用）
   S.beforeFields = {
-    company:   val('beforeCompany'),
-    project:   val('beforeProject'),
-    dept:      val('beforeDept'),
-    section:   val('beforeSection'),
+    company, project, dept, section,
     inspector, oxygenSupervisor: oxygen, phone,
     startTime: start, endTime: end,
     workArea:  area,  workDetail: detail,
   };
-
+ 
   // 更新 Auto Info Box
   document.getElementById('bai_company').textContent   = S.beforeFields.company;
   document.getElementById('bai_project').textContent   = S.beforeFields.project;
@@ -240,16 +314,16 @@ function goToUpload(phase) {
   document.getElementById('bai_oxygen').textContent    = oxygen;
   document.getElementById('bai_area').textContent      = area;
   document.getElementById('bai_detail').textContent    = detail;
-
+ 
   // 切換子頁面
   document.getElementById('beforePageA').style.display = 'none';
   document.getElementById('beforePageB').style.display = 'block';
-
+ 
   // 更新步驟指示
   stepDone('bStep1'); stepActive('bStep2');
   document.getElementById('bLine1').classList.add('ok');
 }
-
+ 
 function backToForm(phase) {
   document.getElementById('beforePageA').style.display = 'block';
   document.getElementById('beforePageB').style.display = 'none';
@@ -257,7 +331,7 @@ function backToForm(phase) {
   document.getElementById('bLine1').classList.remove('ok');
   document.getElementById('bLine2').classList.remove('ok');
 }
-
+ 
 function stepActive(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -276,7 +350,7 @@ function stepReset(id) {
   const num = el.querySelector('.step-dot');
   if (num) num.textContent = num.dataset.num || '?';
 }
-
+ 
 // ================== 作業中/後 查詢作業前記錄 ==================
 async function fetchBeforeRecord(phase) {
   const company = val(phase + 'Company');
@@ -285,61 +359,61 @@ async function fetchBeforeRecord(phase) {
   const autoBox = document.getElementById(phase + 'AutoBox');
   const uploadsEl = document.getElementById(phase + 'Uploads');
   const submitBtn = document.getElementById('btn' + cap(phase) + 'Submit');
-
+ 
   if (!company || !project) return;
-
+ 
   warnEl.classList.remove('show');
   autoBox.style.display = 'none';
   uploadsEl.style.display = 'none';
   submitBtn.disabled = true;
   submitBtn.style.opacity = '0.5';
-
+ 
   try {
     const url = new URL(`${CONFIG.API_ENDPOINT}/api/get-today-before`);
     url.searchParams.set('company', company);
     url.searchParams.set('project', project);
     const res  = await fetch(url);
     const data = await res.json();
-
+ 
     if (!data.found || !data.record) {
       warnEl.classList.add('show');
       return;
     }
-
+ 
     const rec = data.record;
     const prefix = phase === 'mid' ? 'mai_' : 'aai_';
-
+ 
     document.getElementById(prefix + 'inspector').textContent = rec.inspector        || '—';
     document.getElementById(prefix + 'oxygen').textContent    = rec.oxygenSupervisor || '—';
     document.getElementById(prefix + 'phone').textContent     = rec.phone             || '—';
     document.getElementById(prefix + 'area').textContent      = rec.workArea          || '—';
     document.getElementById(prefix + 'detail').textContent    = rec.workDetail        || '—';
     document.getElementById(prefix + 'start').textContent     = (rec.startTime || '').replace('T', ' ');
-
+ 
     autoBox.style.display   = 'grid';
     uploadsEl.style.display = 'block';
     submitBtn.disabled      = false;
     submitBtn.style.opacity = '1';
-
+ 
     // 存到全域
     if (phase === 'mid')   S.midAutoFields   = rec;
     if (phase === 'after') S.afterAutoFields = rec;
-
+ 
   } catch (err) {
     console.error('查詢作業前記錄失敗:', err);
     warnEl.classList.add('show');
   }
 }
-
+ 
 function cap(str) { return str.charAt(0).toUpperCase() + str.slice(1); }
-
+ 
 // ================== 上傳格子建立 ==================
 function buildUploadGrid(phase) {
   const items     = UPLOAD_ITEMS[phase];
   const containerId = phase + 'Uploads';
   const container = document.getElementById(containerId);
   if (!container) return;
-
+ 
   container.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-bottom:16px">` +
     items.map((item, i) => {
       const isPersistent = phase === 'before' && item.persistent;
@@ -366,12 +440,12 @@ function buildUploadGrid(phase) {
       </div>`;
     }).join('') + `</div>`;
 }
-
+ 
 function onDrop(e, k, phase) {
   e.preventDefault();
   if (e.dataTransfer.files.length) onFile(k, e.dataTransfer.files, phase);
 }
-
+ 
 function onFile(k, fl, phase) {
   const store = phase === 'before' ? S.files : (phase === 'mid' ? S.filesMid : S.filesAfter);
   if (!store[k]) store[k] = [];
@@ -381,7 +455,7 @@ function onFile(k, fl, phase) {
   if (box) box.style.borderColor = store[k].length ? '#0f7b5a' : '#ccc';
   S.G_PDF_B64 = ''; // 圖片變更後需重新生成
 }
-
+ 
 function renderPreviews(k, phase) {
   const store = phase === 'before' ? S.files : (phase === 'mid' ? S.filesMid : S.filesAfter);
   const el = document.getElementById(`pv_${phase}_${k}`);
@@ -393,7 +467,7 @@ function renderPreviews(k, phase) {
         style="position:absolute;top:2px;right:2px;width:15px;height:15px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:.58rem;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
     </div>`).join('');
 }
-
+ 
 function rmFile(k, i, phase) {
   const store = phase === 'before' ? S.files : (phase === 'mid' ? S.filesMid : S.filesAfter);
   store[k].splice(i, 1);
@@ -401,7 +475,7 @@ function rmFile(k, i, phase) {
   const box = document.getElementById(`box_${phase}_${k}`);
   if (box) box.style.borderColor = (store[k]?.length) ? '#0f7b5a' : '#ccc';
 }
-
+ 
 // ================== 常用照片帶入預覽 ==================
 // 從 R2 URL 帶入常用照片的縮圖預覽（不需重新上傳就能使用）
 function loadPersistentPreviews(photoUrls) {
@@ -411,13 +485,13 @@ function loadPersistentPreviews(photoUrls) {
     const pvEl = document.getElementById(`pv_before_${k}`);
     const boxEl = document.getElementById(`box_before_${k}`);
     if (!pvEl) return;
-
+ 
     // 若使用者已自行上傳新圖，不覆蓋
     if (S.files[k] && S.files[k].length > 0) return;
-
+ 
     // 標記此格為「使用既有 R2 圖片」（非 File 物件，是 URL 字串）
     if (!S.persistentUrls[k]) S.persistentUrls[k] = url;
-
+ 
     pvEl.innerHTML = `
       <div style="position:relative;border-radius:6px;overflow:hidden;border:2px solid #0f7b5a;">
         <img src="${url}" style="width:54px;height:54px;object-fit:cover;display:block"
@@ -432,7 +506,7 @@ function loadPersistentPreviews(photoUrls) {
     }
   });
 }
-
+ 
 // 使用者點 ✕ 清除帶入的常用照片（改為重新上傳）
 function clearPersistentPreview(k) {
   delete S.persistentUrls[k];
@@ -441,7 +515,7 @@ function clearPersistentPreview(k) {
   if (pvEl)  pvEl.innerHTML = '';
   if (boxEl) { boxEl.style.borderColor = '#ccc'; boxEl.style.borderStyle = 'dashed'; }
 }
-
+ 
 // ================== 圖片壓縮工具 ==================
 // 壓縮到 800px 寬、JPEG 0.65 品質後回傳 base64（不含 data: 前綴）
 async function compressImage(file, maxWidth = 800, quality = 0.65) {
@@ -468,12 +542,12 @@ async function compressImage(file, maxWidth = 800, quality = 0.65) {
     reader.readAsDataURL(file);
   });
 }
-
+ 
 // ================== PDF 生成 + 上傳 ==================
 async function generateAndSubmit(phase) {
   const items = UPLOAD_ITEMS[phase];
   const store = phase === 'before' ? S.files : (phase === 'mid' ? S.filesMid : S.filesAfter);
-
+ 
   // 檢查所有必填圖片
   // 常用照片：新上傳 File 或已有既有 R2 URL，二者之一即可
   const missing = items.filter(it => {
@@ -485,20 +559,20 @@ async function generateAndSubmit(phase) {
     alert(`以下項目尚未上傳圖片：\n${missing.map(m => '• ' + m.label).join('\n')}`);
     return;
   }
-
+ 
   const loadingEl = document.getElementById(phase + 'Loading');
   const msgEl     = document.getElementById(phase + 'Msg');
   const submitBtn = document.getElementById('btn' + cap(phase) + 'Submit');
-
+ 
   loadingEl.style.display = 'block';
   submitBtn.disabled = true;
   submitBtn.textContent = '⏳ 處理中...';
   msgEl.textContent = '';
-
+ 
   try {
     const f    = getFieldsForPhase(phase);
     const phLbl = { before:'作業前', mid:'作業中', after:'作業後' }[phase];
-
+ 
     // ── Step 1（作業前）：先上傳常用照片到 R2 ─────
     if (phase === 'before') {
       msgEl.textContent = '☁️ 正在儲存常用照片...';
@@ -523,17 +597,17 @@ async function generateAndSubmit(phase) {
       // 更新全域常用照片 URL（供 PDF 渲染使用）
       S.persistentUrls = pData.urls || {};
     }
-
+ 
     // ── Step 2: 生成 PDF ───────────────────────────
     msgEl.textContent = '📄 正在生成 PDF...';
     const pdfB64 = await generatePDF(phase, items, store);
     S.G_PDF_B64 = pdfB64;
-
+ 
     // 顯示預覽按鈕（僅作業前）
     if (phase === 'before') {
       document.getElementById('beforePdfArea').classList.add('show');
     }
-
+ 
     // ── Step 3: 上傳 PDF 至 R2 ────────────────────
     msgEl.textContent = '☁️ 正在上傳 PDF...';
     const filename = `局限作業_${phLbl}_${f.project || ''}_${f.inspector || ''}.pdf`;
@@ -544,7 +618,7 @@ async function generateAndSubmit(phase) {
     });
     if (!uploadRes.ok) throw new Error('PDF 上傳失敗');
     const { pdfUrl } = await uploadRes.json();
-
+ 
     // ── Step 4: 寫入 Google Sheets ────────────────
     msgEl.textContent = '📊 正在寫入 Google Sheets...';
     const actionMap = { before: '/api/submit-before', mid: '/api/submit-mid', after: '/api/submit-after' };
@@ -554,19 +628,19 @@ async function generateAndSubmit(phase) {
       body: JSON.stringify({ fields: f, pdfUrl })
     });
     if (!submitRes.ok) throw new Error('寫入 Sheets 失敗');
-
+ 
     // 成功
     loadingEl.style.display = 'none';
     msgEl.style.color = '#0f7b5a';
     msgEl.textContent = '✅ 通報成功！PDF 已儲存至雲端。';
     submitBtn.textContent = '✅ 已送出';
-
+ 
     // 作業前完成後可繼續用於作業中/後
     if (phase === 'before') {
       stepDone('bStep2'); stepActive('bStep3');
       document.getElementById('bLine2').classList.add('ok');
     }
-
+ 
   } catch (err) {
     console.error('送出失敗:', err);
     loadingEl.style.display = 'none';
@@ -576,14 +650,14 @@ async function generateAndSubmit(phase) {
     submitBtn.textContent = '🚀 生成 PDF 並上傳送出';
   }
 }
-
+ 
 function getFieldsForPhase(phase) {
   if (phase === 'before') return S.beforeFields || {};
   if (phase === 'mid')    return { ...(S.midAutoFields || {}),   company: val('midCompany'),   project: val('midProject') };
   if (phase === 'after')  return { ...(S.afterAutoFields || {}), company: val('afterCompany'), project: val('afterProject') };
   return {};
 }
-
+ 
 // ================== PDF 生成（html2canvas → jsPDF）==================
 async function generatePDF(phase, items, store) {
   const f        = getFieldsForPhase(phase);
@@ -592,7 +666,7 @@ async function generatePDF(phase, items, store) {
   const phBg     = { before:'#eef2fc', mid:'#f5f3ff', after:'#ecfeff' }[phase];
   const TH = 'border:1px solid #cbd5e1;padding:8px 10px;background:#f8fafc;color:#334155;width:20%;vertical-align:top';
   const TD = 'border:1px solid #cbd5e1;padding:8px 10px;vertical-align:top';
-
+ 
   // 讀取圖片 dataURL（File 物件）或使用 R2 URL（常用照片沒有新上傳時）
   const imgMap = {};
   for (const item of items) {
@@ -607,7 +681,7 @@ async function generatePDF(phase, items, store) {
       imgMap[item.k] = [];
     }
   }
-
+ 
   // 建立隱藏渲染容器
   let imgRows = '';
   for (const item of items) {
@@ -618,7 +692,7 @@ async function generatePDF(phase, items, store) {
       </div>`;
     });
   }
-
+ 
   const container = document.createElement('div');
   container.id = '__pdfRender';
   container.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;background:#fff;padding:40px;font-family:Arial,sans-serif;font-size:13px;line-height:1.6;color:#111;box-sizing:border-box';
@@ -641,12 +715,12 @@ async function generatePDF(phase, items, store) {
     <div style="background:#eef2fc;font-weight:bold;color:#2952c8;padding:7px 12px;margin-bottom:12px;border-left:5px solid #2952c8;font-size:13px">查核照片與附件（${phLbl}）</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${imgRows}</div>`;
   document.body.appendChild(container);
-
+ 
   const canvas = await html2canvas(container, {
     scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff', logging: false
   });
   document.body.removeChild(container);
-
+ 
   const { jsPDF } = window.jspdf;
   const pdf  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const A4_W = 210, A4_H = 297;
@@ -654,7 +728,7 @@ async function generatePDF(phase, items, store) {
   const pageHpx = A4_H / ratio;
   const totalH  = canvas.height / 2;
   let yOff = 0, pageNum = 0;
-
+ 
   while (yOff < totalH) {
     if (pageNum > 0) pdf.addPage();
     const sliceH  = Math.min(pageHpx, totalH - yOff);
@@ -665,10 +739,10 @@ async function generatePDF(phase, items, store) {
     pdf.addImage(tmp.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, A4_W, sliceH * ratio);
     yOff += sliceH; pageNum++;
   }
-
+ 
   return pdf.output('datauristring').split(',')[1];
 }
-
+ 
 function fileToDataUrl(file) {
   return new Promise(res => {
     const r = new FileReader();
@@ -676,7 +750,7 @@ function fileToDataUrl(file) {
     r.readAsDataURL(file);
   });
 }
-
+ 
 function previewPDF() {
   if (!S.G_PDF_B64) { alert('請先生成 PDF'); return; }
   const bytes = atob(S.G_PDF_B64);
@@ -684,7 +758,7 @@ function previewPDF() {
   for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
   window.open(URL.createObjectURL(new Blob([buf], { type: 'application/pdf' })), '_blank');
 }
-
+ 
 // ================== 查詢邏輯 ==================
 async function searchRecords() {
   const date    = val('queryDate');
@@ -692,43 +766,43 @@ async function searchRecords() {
   const phase   = val('queryPhase');
   const insp    = val('queryInspector');
   const div     = document.getElementById('queryResults');
-
+ 
   if (!date && !company) {
     alert('請至少輸入「查詢日期」或選擇「公司名稱」');
     return;
   }
-
+ 
   document.getElementById('queryLoading').style.display = 'block';
   div.innerHTML = '';
-
+ 
   try {
     const url = new URL(`${CONFIG.API_ENDPOINT}/api/search-records`);
     if (date)    url.searchParams.set('date', date);
     if (company) url.searchParams.set('company', company);
     if (phase)   url.searchParams.set('phase', phase);
     if (insp)    url.searchParams.set('inspector', insp);
-
+ 
     const res  = await fetch(url);
     const json = await res.json();
-
+ 
     if (json.error) throw new Error(json.error);
     if (!json.data || json.data.length === 0) {
       div.innerHTML = '<div class="no-results">查無資料</div>';
       return;
     }
-
+ 
     const phaseInfo = {
       before: { label:'作業前', cls:'badge-before' },
       mid:    { label:'作業中', cls:'badge-mid' },
       after:  { label:'作業後', cls:'badge-after' },
     };
-
+ 
     let html = `<table class="result-table">
       <thead><tr>
         <th>時機</th><th>公司</th><th>工程</th><th>檢驗員</th>
         <th>開始時間</th><th>作業地點</th><th>PDF</th>
       </tr></thead><tbody>`;
-
+ 
     json.data.forEach(row => {
       const pi   = phaseInfo[row.phase] || { label: row.phase || '—', cls: '' };
       const pdfLink = row.pdfUrl
@@ -744,7 +818,7 @@ async function searchRecords() {
         <td>${pdfLink}</td>
       </tr>`;
     });
-
+ 
     div.innerHTML = html + '</tbody></table>';
   } catch (err) {
     console.error(err);
@@ -753,12 +827,13 @@ async function searchRecords() {
     document.getElementById('queryLoading').style.display = 'none';
   }
 }
-
+ 
 // ================== 工具 ==================
 function val(id) { return document.getElementById(id)?.value || ''; }
-
+ 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initApp);
 } else {
   initApp();
 }
+ 
