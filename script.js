@@ -273,15 +273,27 @@ async function goToUpload(phase) {
   // 讀取公司/工程（含「其他」手動輸入）
   const coSel  = val('beforeCompany');
   const prjSel = val('beforeProject');
-  const company = (coSel  === '__other__') ? val('manualCompany')  : coSel;
-  const project = (prjSel === '__other__') ? val('manualProject')  : prjSel;
-  const dept    = (coSel  === '__other__') ? val('manualDept')     : val('beforeDept');
-  const section = (coSel  === '__other__') ? val('manualSection')  : val('beforeSection');
  
-  if (!company || !project) {
-    alert('請填寫公司名稱與工程名稱');
-    return;
-  }
+  // 公司：__other__ → 讀手動欄位；否則用下拉值
+  const company = (coSel === '__other__')
+    ? val('manualCompany').trim()
+    : coSel;
+ 
+  // 工程：下拉或手動欄位（公司是「其他」時工程也一律讀手動）
+  const project = (coSel === '__other__' || prjSel === '__other__')
+    ? val('manualProject').trim()
+    : prjSel;
+ 
+  // 部門課別：「其他」時讀手動欄位，否則讀 beforeDept/beforeSection
+  const dept    = (coSel === '__other__')
+    ? val('manualDept').trim()
+    : val('beforeDept');
+  const section = (coSel === '__other__')
+    ? val('manualSection').trim()
+    : val('beforeSection');
+ 
+  if (!company) { alert('請填寫公司名稱'); return; }
+  if (!project) { alert('請填寫工程名稱'); return; }
  
   // 若手動輸入，自動存入 DROPDOWNDATA
   if (coSel === '__other__' || prjSel === '__other__') {
@@ -686,16 +698,16 @@ async function generatePDF(phase, items, store) {
   let imgRows = '';
   for (const item of items) {
     (imgMap[item.k] || []).forEach(src => {
-      imgRows += `<div style="border:1px solid #ddd;padding:6px;text-align:center;margin-bottom:8px">
-        <img src="${src}" crossorigin="anonymous" style="max-width:100%;max-height:220px;object-fit:contain;display:block;margin:0 auto">
-        <div style="font-size:12px;font-weight:bold;margin-top:5px;color:#334155">${item.label}</div>
+      imgRows += `<div style="border:1px solid #ddd;padding:8px;text-align:center;margin-bottom:10px">
+        <img src="${src}" crossorigin="anonymous" style="max-width:100%;height:auto;display:block;margin:0 auto">
+        <div style="font-size:12px;font-weight:bold;margin-top:6px;color:#334155">${item.label}</div>
       </div>`;
     });
   }
  
   const container = document.createElement('div');
   container.id = '__pdfRender';
-  container.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;background:#fff;padding:40px;font-family:Arial,sans-serif;font-size:13px;line-height:1.6;color:#111;box-sizing:border-box';
+  container.style.cssText = 'position:fixed;left:-9999px;top:0;width:860px;background:#fff;padding:32px 40px;font-family:Arial,sans-serif;font-size:13px;line-height:1.6;color:#111;box-sizing:border-box';
   container.innerHTML = `
     <div style="text-align:center;margin-bottom:24px;border-bottom:3px solid ${phColor};padding-bottom:14px">
       <h1 style="margin:0;color:#1d3d9e;font-size:22px">局限空間作業通報書</h1>
@@ -713,7 +725,7 @@ async function generatePDF(phase, items, store) {
       <tr><th style="${TH}">作業區域</th><td style="${TD}">${f.workArea||'—'}</td><th style="${TH}">詳細位置</th><td style="${TD}">${f.workDetail||'—'}</td></tr>
     </table>
     <div style="background:#eef2fc;font-weight:bold;color:#2952c8;padding:7px 12px;margin-bottom:12px;border-left:5px solid #2952c8;font-size:13px">查核照片與附件（${phLbl}）</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${imgRows}</div>`;
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">${imgRows}</div>`;
   document.body.appendChild(container);
  
   const canvas = await html2canvas(container, {
@@ -836,4 +848,3 @@ if (document.readyState === 'loading') {
 } else {
   initApp();
 }
- 
