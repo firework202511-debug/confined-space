@@ -260,7 +260,7 @@
     <h1>⚠️ 局限空間作業通報系統</h1>
 
     <div class="sheet-link-container">
-      <a href="https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit" target="_blank" class="sheet-link-btn">
+      <a href="https://docs.google.com/spreadsheets/d/1ptbLQSRfyJ7UUhCyXEPOx16t4z1JLwISmXst2D4iE28/edit" target="_blank" class="sheet-link-btn">
         📊 查看完整資料 (Google Sheet)
       </a>
     </div>
@@ -359,6 +359,44 @@
           font-weight:600;
           color:#2952c8;
         "></div>
+
+        <!-- ★ 手動輸入區（選「其他」時展開） -->
+        <div id="beforeManualBox" style="
+          display:none;
+          margin-bottom:16px;
+          padding:16px;
+          background:#fffbeb;
+          border:1.5px dashed #b45309;
+          border-radius:10px;
+        ">
+          <div style="font-size:.82rem;font-weight:700;color:#b45309;margin-bottom:12px">
+            ✏️ 手動輸入（點「下一步」後自動存入選單）
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="font-size:.78rem;font-weight:600;color:#555;display:block;margin-bottom:4px">公司名稱 *</label>
+              <input type="text" id="manualCompany" class="..." placeholder="輸入公司名稱"
+                oninput="updateProceedBtn('before')"
+                style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:8px;font-size:.9rem;font-family:inherit">
+            </div>
+            <div>
+              <label style="font-size:.78rem;font-weight:600;color:#555;display:block;margin-bottom:4px">工程名稱 *</label>
+              <input type="text" id="manualProject" placeholder="輸入工程名稱"
+                oninput="updateProceedBtn('before')"
+                style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:8px;font-size:.9rem;font-family:inherit">
+            </div>
+            <div>
+              <label style="font-size:.78rem;font-weight:600;color:#555;display:block;margin-bottom:4px">主辦部門</label>
+              <input type="text" id="manualDept" placeholder="輸入主辦部門"
+                style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:8px;font-size:.9rem;font-family:inherit">
+            </div>
+            <div>
+              <label style="font-size:.78rem;font-weight:600;color:#555;display:block;margin-bottom:4px">主辦課別</label>
+              <input type="text" id="manualSection" placeholder="輸入主辦課別"
+                style="width:100%;padding:10px;border:1.5px solid #ddd;border-radius:8px;font-size:.9rem;font-family:inherit">
+            </div>
+          </div>
+        </div>
 
         <button type="button" id="btnBeforeNext" onclick="goToUpload('before')" style="width:100%;padding:14px;background:#2952c8;color:white;border:none;border-radius:8px;font-size:1.1em;font-weight:bold;cursor:pointer;">
           下一步：上傳文件 →
