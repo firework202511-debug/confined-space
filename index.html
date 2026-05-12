@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>局限空間作業通報系統</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Microsoft JhengHei', Arial, sans-serif;
+      background: linear-gradient(135deg, #1d3d9e 0%, #0d7490 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container { max-width: 860px; margin: 0 auto; }
+
+    h1 {
+      text-align: center;
+      color: white;
+      margin-bottom: 20px;
+      font-size: 2.2em;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .sheet-link-container { text-align: center; margin-bottom: 25px; }
+    .sheet-link-btn {
+      display: inline-block;
+      color: white;
+      text-decoration: none;
+      font-weight: bold;
+      border: 1px solid rgba(255,255,255,0.6);
+      padding: 8px 20px;
+      border-radius: 50px;
+      background: rgba(255,255,255,0.15);
+      backdrop-filter: blur(5px);
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      font-size: 0.95em;
+    }
+    .sheet-link-btn:hover {
+      background: rgba(255,255,255,0.3);
+      transform: translateY(-2px);
+    }
+
+    .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+    .tab {
+      flex: 1;
+      padding: 15px;
+      background: rgba(255,255,255,0.9);
+      border: none;
+      border-radius: 10px 10px 0 0;
+      cursor: pointer;
+      font-size: 1em;
+      font-weight: bold;
+      transition: all 0.3s;
+    }
+    .tab:hover { background: white; transform: translateY(-2px); }
+    .tab.active { background: white; border-bottom: 4px solid #2952c8; }
+
+    .form-container {
+      background: white;
+      padding: 30px;
+      border-radius: 0 0 15px 15px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      display: none;
+    }
+    .form-container.active { display: block; }
+
+    .form-group { margin-bottom: 20px; }
+    label { display: block; margin-bottom: 8px; color: #333; font-weight: bold; }
+
+    input[type="text"],
+    input[type="datetime-local"],
+    input[type="tel"],
+    select, textarea {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 1em;
+      transition: border-color 0.3s;
+      font-family: inherit;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: #2952c8;
+    }
+
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+    /* 上傳區塊 */
+    .photo-upload {
+      border: 2px dashed #ccc;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .photo-upload:hover { border-color: #2952c8; background: #f0f4ff; }
+    .photo-upload input[type="file"] { display: none; }
+    .photo-label { color: #666; font-size: 0.9em; margin-top: 5px; }
+
+    .status {
+      margin-top: 8px;
+      padding: 8px;
+      border-radius: 5px;
+      font-size: 0.9em;
+      min-height: 20px;
+    }
+
+    /* 自動帶入資訊欄 */
+    .auto-info-box {
+      background: #eef2fc;
+      border: 1px solid #c3d4ff;
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 20px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    .auto-info-box .ai-item { display: flex; flex-direction: column; gap: 3px; }
+    .auto-info-box .ai-lbl { font-size: 0.68rem; font-weight: 700; color: #8e97aa; text-transform: uppercase; }
+    .auto-info-box .ai-val { font-size: 0.9rem; font-weight: 600; color: #1d3d9e; }
+
+    /* 查無記錄警告 */
+    .warn-box {
+      background: #fffbeb;
+      border: 1.5px solid #b45309;
+      border-radius: 8px;
+      padding: 14px 18px;
+      margin-bottom: 16px;
+      color: #b45309;
+      font-size: 0.9em;
+      display: none;
+    }
+    .warn-box.show { display: block; }
+
+    button[type="submit"], button.search-btn {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, #2952c8 0%, #0d7490 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1.1em;
+      font-weight: bold;
+      cursor: pointer;
+      transition: transform 0.2s;
+      font-family: inherit;
+    }
+    button[type="submit"]:hover:not(:disabled), button.search-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(41, 82, 200, 0.4);
+    }
+    button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .loading { display: none; text-align: center; color: #2952c8; margin-top: 10px; }
+
+    /* 查詢結果 */
+    .result-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    .result-table th, .result-table td { border: 1px solid #ddd; padding: 10px; text-align: left; font-size: 0.9em; }
+    .result-table th { background-color: #f2f2f2; color: #333; font-weight: bold; }
+    .result-table tr:nth-child(even) { background-color: #f9f9f9; }
+    .result-table tr:hover { background-color: #f1f1f1; }
+
+    .badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 0.82em; color: white; font-weight: bold; }
+    .badge-before { background-color: #2952c8; }
+    .badge-mid    { background-color: #6d28d9; }
+    .badge-after  { background-color: #0d7490; }
+
+    .no-results { text-align: center; color: #666; margin-top: 20px; padding: 20px; }
+
+    /* PDF 預覽區 */
+    .pdf-preview-area {
+      margin-top: 18px;
+      padding: 16px;
+      background: #f0f2f6;
+      border: 1px solid #dde1ea;
+      border-radius: 10px;
+      display: none;
+    }
+    .pdf-preview-area.show { display: block; }
+
+    .btn-preview {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 18px;
+      background: #fffbeb;
+      color: #b45309;
+      border: 1.5px solid #b45309;
+      border-radius: 6px;
+      font-size: 0.9em;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .btn-preview:hover { background: #b45309; color: white; }
+
+    .btn-upload {
+      display: none;
+      width: 100%;
+      padding: 13px;
+      background: #0f7b5a;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1em;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 10px;
+      font-family: inherit;
+      transition: background 0.15s;
+    }
+    .btn-upload:hover { background: #0a6349; }
+    .btn-upload.show { display: block; }
+
+    /* 進度步驟 */
+    .steps {
+      display: flex;
+      align-items: center;
+      margin-bottom: 24px;
+      padding: 14px 18px;
+      background: #f0f4ff;
+      border-radius: 10px;
+    }
+    .step { display: flex; align-items: center; gap: 8px; flex: 1; }
+    .step-dot {
+      width: 26px; height: 26px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.72rem; font-weight: 700;
+      background: #e0e0e0; color: #888; border: 2px solid #ccc;
+      flex-shrink: 0;
+    }
+    .step.on .step-dot { background: #2952c8; color: white; border-color: #2952c8; }
+    .step.ok .step-dot { background: #0f7b5a; color: white; border-color: #0f7b5a; }
+    .step-txt { font-size: 0.8rem; color: #888; }
+    .step.on .step-txt { color: #2952c8; font-weight: 600; }
+    .step.ok .step-txt { color: #0f7b5a; }
+    .step-line { flex: none; width: 28px; height: 2px; background: #dde; margin: 0 4px; }
+    .step-line.ok { background: #0f7b5a; }
+
+    @media (max-width: 600px) {
+      .row, .row-3, .auto-info-box { grid-template-columns: 1fr; }
+      .tabs { flex-wrap: wrap; }
+      .tab { min-width: calc(50% - 5px); border-radius: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>⚠️ 局限空間作業通報系統</h1>
+
+    <div class="sheet-link-container">
+      <a href="https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit" target="_blank" class="sheet-link-btn">
+        📊 查看完整資料 (Google Sheet)
+      </a>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('before', event)">📋 作業前</button>
+      <button class="tab" onclick="switchTab('mid', event)">🎥 作業中</button>
+      <button class="tab" onclick="switchTab('after', event)">✅ 作業後</button>
+      <button class="tab" onclick="switchTab('query', event)">🔍 查詢記錄</button>
+    </div>
+
+    <!-- ══════════════════ 作業前 ══════════════════ -->
+    <div id="beforeFormContainer" class="form-container active">
+      <div class="steps">
+        <div class="step on" id="bStep1"><div class="step-dot">1</div><div class="step-txt">填寫資料</div></div>
+        <div class="step-line" id="bLine1"></div>
+        <div class="step" id="bStep2"><div class="step-dot">2</div><div class="step-txt">上傳文件</div></div>
+        <div class="step-line" id="bLine2"></div>
+        <div class="step" id="bStep3"><div class="step-dot">3</div><div class="step-txt">送出完成</div></div>
+      </div>
+
+      <!-- 子頁面 A：資料填寫 -->
+      <div id="beforePageA">
+        <div class="row">
+          <div class="form-group">
+            <label>承攬商公司 *</label>
+            <select id="beforeCompany" onchange="onCompanyChange('before')">
+              <option value="">載入中...</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>工程名稱 *</label>
+            <select id="beforeProject" disabled onchange="updateProceedBtn('before')">
+              <option value="">請先選擇公司</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="form-group">
+            <label>主辦部門</label>
+            <input type="text" id="beforeDept" readonly placeholder="自動帶入">
+          </div>
+          <div class="form-group">
+            <label>主辦課別</label>
+            <input type="text" id="beforeSection" readonly placeholder="自動帶入">
+          </div>
+        </div>
+
+        <div class="row-3">
+          <div class="form-group">
+            <label>檢驗員姓名 *</label>
+            <input type="text" id="beforeInspector" placeholder="請輸入姓名">
+          </div>
+          <div class="form-group">
+            <label>缺氧作業主管 *</label>
+            <input type="text" id="beforeOxygen" placeholder="請輸入姓名">
+          </div>
+          <div class="form-group">
+            <label>聯絡方式 *</label>
+            <input type="tel" id="beforePhone" placeholder="電話或分機">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="form-group">
+            <label>開始時間 *</label>
+            <input type="datetime-local" id="beforeStart">
+          </div>
+          <div class="form-group">
+            <label>結束時間 *</label>
+            <input type="datetime-local" id="beforeEnd">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="form-group">
+            <label>作業區域 *</label>
+            <input type="text" id="beforeArea" placeholder="例：廠區 A 棟">
+          </div>
+          <div class="form-group">
+            <label>詳細位置 *</label>
+            <input type="text" id="beforeDetail" placeholder="例：B1 管道間 H-3">
+          </div>
+        </div>
+
+        <!-- ★ 上次記錄帶入提示 -->
+        <div id="beforeLastHint" style="
+          display:none;
+          margin-bottom:16px;
+          padding:12px 16px;
+          border-radius:8px;
+          background:#eef2fc;
+          border:1px solid #c3d4ff;
+          font-size:0.88em;
+          font-weight:600;
+          color:#2952c8;
+        "></div>
+
+        <button type="button" id="btnBeforeNext" onclick="goToUpload('before')" style="width:100%;padding:14px;background:#2952c8;color:white;border:none;border-radius:8px;font-size:1.1em;font-weight:bold;cursor:pointer;">
+          下一步：上傳文件 →
+        </button>
+      </div>
+
+      <!-- 子頁面 B：上傳 + PDF -->
+      <div id="beforePageB" style="display:none">
+        <div class="auto-info-box" id="beforeAutoBox">
+          <div class="ai-item"><div class="ai-lbl">公司</div><div class="ai-val" id="bai_company">—</div></div>
+          <div class="ai-item"><div class="ai-lbl">工程</div><div class="ai-val" id="bai_project">—</div></div>
+          <div class="ai-item"><div class="ai-lbl">檢驗員</div><div class="ai-val" id="bai_inspector">—</div></div>
+          <div class="ai-item"><div class="ai-lbl">缺氧主管</div><div class="ai-val" id="bai_oxygen">—</div></div>
+          <div class="ai-item"><div class="ai-lbl">作業區域</div><div class="ai-val" id="bai_area">—</div></div>
+          <div class="ai-item"><div class="ai-lbl">詳細位置</div><div class="ai-val" id="bai_detail">—</div></div>
+        </div>
+
+        <div id="beforeUploads"></div>
+
+        <button type="button" onclick="generateAndSubmit('before')" id="btnBeforeSubmit"
+          style="width:100%;padding:15px;background:linear-gradient(135deg,#2952c8,#0d7490);color:white;border:none;border-radius:8px;font-size:1.1em;font-weight:bold;cursor:pointer;margin-top:10px;">
+          🚀 生成 PDF 並上傳送出
+        </button>
+        <div id="beforeLoading" class="loading">⏳ 處理中，請稍候...</div>
+        <div id="beforeMsg" class="status"></div>
+
+        <div id="beforePdfArea" class="pdf-preview-area">
+          <p style="color:#0f7b5a;font-weight:600;margin-bottom:8px">✅ PDF 已產生</p>
+          <button class="btn-preview" onclick="previewPDF()">👁 預覽 PDF</button>
+        </div>
+
+        <button type="button" onclick="backToForm('before')"
+          style="width:100%;padding:10px;background:transparent;color:#666;border:1.5px solid #ddd;border-radius:8px;font-size:0.9em;cursor:pointer;margin-top:12px;">
+          ← 返回修改資料
+        </button>
+      </div>
+    </div>
+
+    <!-- ══════════════════ 作業中 ══════════════════ -->
+    <div id="midFormContainer" class="form-container">
+      <div class="steps">
+        <div class="step on"><div class="step-dot">1</div><div class="step-txt">確認資料</div></div>
+        <div class="step-line"></div>
+        <div class="step"><div class="step-dot">2</div><div class="step-txt">上傳文件</div></div>
+        <div class="step-line"></div>
+        <div class="step"><div class="step-dot">3</div><div class="step-txt">送出完成</div></div>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>承攬商公司 *</label>
+          <select id="midCompany" onchange="onCompanyChange('mid')">
+            <option value="">載入中...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>工程名稱 *</label>
+          <select id="midProject" disabled onchange="fetchBeforeRecord('mid')">
+            <option value="">請先選擇公司</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="warn-box" id="midWarn">
+        ⚠️ 今日尚未找到此公司／工程的<strong>作業前通報</strong>，請先完成作業前通報後再進行作業中通報。
+      </div>
+
+      <div class="auto-info-box" id="midAutoBox" style="display:none">
+        <div class="ai-item"><div class="ai-lbl">檢驗員</div><div class="ai-val" id="mai_inspector">—</div></div>
+        <div class="ai-item"><div class="ai-lbl">缺氧主管</div><div class="ai-val" id="mai_oxygen">—</div></div>
+        <div class="ai-item"><div class="ai-lbl">聯絡方式</div><div class="ai-val" id="mai_phone">—</div></div>
+        <div class="ai-item"><div class="ai-lbl">作業區域</div><div class="ai-val" id="mai_area">—</div></div>
+        <div class="ai-item"><div class="ai-lbl">詳細位置</div><div class="ai-val" id="mai_detail">—</div></div>
+        <div class="ai-item"><div class="ai-lbl">開始時間</div><div class="ai-val" id="mai_start">—</div></div>
+      </div>
+
+      <div id="midUploads" style="display:none"></div>
+
+      <button type="button" onclick="generateAndSubmit('mid')" id="btnMidSubmit" disabled
+        style="width:100%;padding:15px;background:linear-gradient(135deg,#6d28d9,#2952c8);color:white;border:none;border-radius:8px;font-size:1.1em;font-weight:bold;cursor:pointer;margin-top:10px;opacity:0.5;">
+        🚀 生成 PDF 並上傳送出
+      </button>
+      <div id="midLoading" class="loading">⏳ 處理中，請稍候...</div>
+      <div id="midMsg" class="status"></div>
+    </div>
+
+    <!-- ══════════════════ 作業後 ══════════════════ -->
+    <div id="afterFormContainer" class="form-container">
+      <div class="steps">
+        <div class="step on"><div class="step-dot">1</div><div class="step-txt">確認資料</div></div>
+        <div class="step-line"></div>
+        <div class="step"><div class="step-dot">2</div><div class="step-txt">上傳文件</div></div>
+        <div class="step-line"></div>
+        <div class="step"><div class="step-dot">3</div><div class="step-txt">送出完成</div></div>
+      </div>
+
+      <div class="row">
+        <div class="form-group">
+          <label>承攬商公司 *</label>
+          <select id="afterCompany" onchange="onCompanyChange('after')">
+            <option value="">載入中...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>工程名稱 *</label>
+          <select id="afterProject" disabled onchange="fetchBeforeRecord('after')">
+            <option value="">請先選擇公司</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="warn-box" id="afterWarn">
+        ⚠️ 今日尚未找到此公司／工程的<strong>作業前通報</strong>，請先完成作業前通報後再進行作業後通報。
+      </div>
+
+      <div class="auto-info-box" id="afterAutoBox" style="display:none">
+        <div class="ai-item"><div class="ai-lbl">檢驗員</div><div class="ai-val" id="aai_inspector">—</div></div>
+        <div class="ai-item"><div class="ai-lbl">缺氧主管</div><div class="ai-val" id="aai_oxygen">—</div></div>
+        <div class="ai-item"><div class="ai-lbl">聯絡方式</div><div class="ai-val" id="aai_phone">—</div></div>
+        <div class="ai-item"><div class="ai-lbl">作業區域</div><div class="ai-val" id="aai_area">—</div></div>
+        <div class="ai-item"><div class="ai-lbl">詳細位置</div><div class="ai-val" id="aai_detail">—</div></div>
+        <div class="ai-item"><div class="ai-lbl">開始時間</div><div class="ai-val" id="aai_start">—</div></div>
+      </div>
+
+      <div id="afterUploads" style="display:none"></div>
+
+      <button type="button" onclick="generateAndSubmit('after')" id="btnAfterSubmit" disabled
+        style="width:100%;padding:15px;background:linear-gradient(135deg,#0d7490,#0f7b5a);color:white;border:none;border-radius:8px;font-size:1.1em;font-weight:bold;cursor:pointer;margin-top:10px;opacity:0.5;">
+        🚀 生成 PDF 並上傳送出
+      </button>
+      <div id="afterLoading" class="loading">⏳ 處理中，請稍候...</div>
+      <div id="afterMsg" class="status"></div>
+    </div>
+
+    <!-- ══════════════════ 查詢 ══════════════════ -->
+    <div id="queryFormContainer" class="form-container">
+      <div class="form-group">
+        <label>查詢日期（若查單一公司近況可不填）</label>
+        <input type="date" id="queryDate">
+      </div>
+      <div class="row">
+        <div class="form-group">
+          <label>承攬商公司（選填）</label>
+          <select id="queryCompany">
+            <option value="">— 全部 —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>上傳時機點（選填）</label>
+          <select id="queryPhase">
+            <option value="">— 全部 —</option>
+            <option value="before">作業前</option>
+            <option value="mid">作業中</option>
+            <option value="after">作業後</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>檢驗員姓名（選填）</label>
+        <input type="text" id="queryInspector" placeholder="姓名關鍵字">
+      </div>
+      <button type="button" class="search-btn" onclick="searchRecords()">🔍 查詢</button>
+      <div id="queryLoading" class="loading">⏳ 查詢中...</div>
+      <div id="queryResults"></div>
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tab, event) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+      document.querySelectorAll('.form-container').forEach(c => c.classList.remove('active'));
+      document.getElementById(tab + 'FormContainer').classList.add('active');
+    }
+  </script>
+  <script src="script.js"></script>
+</body>
+</html>
