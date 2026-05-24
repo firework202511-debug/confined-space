@@ -172,7 +172,6 @@
 
     .badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 0.82em; color: white; font-weight: bold; }
     .badge-before { background-color: #2952c8; }
-    .badge-mid    { background-color: #6d28d9; }
     .badge-after  { background-color: #0d7490; }
 
     .no-results { text-align: center; color: #666; margin-top: 20px; padding: 20px; }
@@ -248,6 +247,20 @@
     .step-line { flex: none; width: 28px; height: 2px; background: #dde; margin: 0 4px; }
     .step-line.ok { background: #0f7b5a; }
 
+    /* 個資遮蓋提示 */
+    .privacy-note {
+      display: inline-block;
+      margin-left: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #b45309;
+      background: #fffbeb;
+      border: 1px solid #f59e0b;
+      border-radius: 4px;
+      padding: 1px 6px;
+      vertical-align: middle;
+    }
+
     @media (max-width: 600px) {
       .row, .row-3, .auto-info-box { grid-template-columns: 1fr; }
       .tabs { flex-wrap: wrap; }
@@ -267,7 +280,6 @@
 
     <div class="tabs">
       <button class="tab active" onclick="switchTab('before', event)">📋 作業前</button>
-      <button class="tab" onclick="switchTab('mid', event)">🎥 作業中</button>
       <button class="tab" onclick="switchTab('after', event)">✅ 作業後</button>
       <button class="tab" onclick="switchTab('query', event)">🔍 查詢記錄</button>
     </div>
@@ -322,6 +334,18 @@
           <div class="form-group">
             <label>聯絡方式 *</label>
             <input type="tel" id="beforePhone" placeholder="電話或分機">
+          </div>
+        </div>
+
+        <!-- ★ 新增：監視人員 & 急救人員 -->
+        <div class="row">
+          <div class="form-group">
+            <label>監視人員姓名 *</label>
+            <input type="text" id="beforeWatchman" placeholder="請每日手動輸入">
+          </div>
+          <div class="form-group">
+            <label>急救人員姓名 *</label>
+            <input type="text" id="beforeRescuer" placeholder="請輸入姓名">
           </div>
         </div>
 
@@ -410,6 +434,8 @@
           <div class="ai-item"><div class="ai-lbl">工程</div><div class="ai-val" id="bai_project">—</div></div>
           <div class="ai-item"><div class="ai-lbl">檢驗員</div><div class="ai-val" id="bai_inspector">—</div></div>
           <div class="ai-item"><div class="ai-lbl">缺氧主管</div><div class="ai-val" id="bai_oxygen">—</div></div>
+          <div class="ai-item"><div class="ai-lbl">監視人員</div><div class="ai-val" id="bai_watchman">—</div></div>
+          <div class="ai-item"><div class="ai-lbl">急救人員</div><div class="ai-val" id="bai_rescuer">—</div></div>
           <div class="ai-item"><div class="ai-lbl">作業區域</div><div class="ai-val" id="bai_area">—</div></div>
           <div class="ai-item"><div class="ai-lbl">詳細位置</div><div class="ai-val" id="bai_detail">—</div></div>
         </div>
@@ -433,54 +459,6 @@
           ← 返回修改資料
         </button>
       </div>
-    </div>
-
-    <!-- ══════════════════ 作業中 ══════════════════ -->
-    <div id="midFormContainer" class="form-container">
-      <div class="steps">
-        <div class="step on"><div class="step-dot">1</div><div class="step-txt">確認資料</div></div>
-        <div class="step-line"></div>
-        <div class="step"><div class="step-dot">2</div><div class="step-txt">上傳文件</div></div>
-        <div class="step-line"></div>
-        <div class="step"><div class="step-dot">3</div><div class="step-txt">送出完成</div></div>
-      </div>
-
-      <div class="row">
-        <div class="form-group">
-          <label>承攬商公司 *</label>
-          <select id="midCompany" onchange="onCompanyChange('mid')">
-            <option value="">載入中...</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>工程名稱 *</label>
-          <select id="midProject" disabled onchange="fetchBeforeRecord('mid')">
-            <option value="">請先選擇公司</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="warn-box" id="midWarn">
-        ⚠️ 今日尚未找到此公司／工程的<strong>作業前通報</strong>，請先完成作業前通報後再進行作業中通報。
-      </div>
-
-      <div class="auto-info-box" id="midAutoBox" style="display:none">
-        <div class="ai-item"><div class="ai-lbl">檢驗員</div><div class="ai-val" id="mai_inspector">—</div></div>
-        <div class="ai-item"><div class="ai-lbl">缺氧主管</div><div class="ai-val" id="mai_oxygen">—</div></div>
-        <div class="ai-item"><div class="ai-lbl">聯絡方式</div><div class="ai-val" id="mai_phone">—</div></div>
-        <div class="ai-item"><div class="ai-lbl">作業區域</div><div class="ai-val" id="mai_area">—</div></div>
-        <div class="ai-item"><div class="ai-lbl">詳細位置</div><div class="ai-val" id="mai_detail">—</div></div>
-        <div class="ai-item"><div class="ai-lbl">開始時間</div><div class="ai-val" id="mai_start">—</div></div>
-      </div>
-
-      <div id="midUploads" style="display:none"></div>
-
-      <button type="button" onclick="generateAndSubmit('mid')" id="btnMidSubmit" disabled
-        style="width:100%;padding:15px;background:linear-gradient(135deg,#6d28d9,#2952c8);color:white;border:none;border-radius:8px;font-size:1.1em;font-weight:bold;cursor:pointer;margin-top:10px;opacity:0.5;">
-        🚀 生成 PDF 並上傳送出
-      </button>
-      <div id="midLoading" class="loading">⏳ 處理中，請稍候...</div>
-      <div id="midMsg" class="status"></div>
     </div>
 
     <!-- ══════════════════ 作業後 ══════════════════ -->
@@ -549,7 +527,6 @@
           <select id="queryPhase">
             <option value="">— 全部 —</option>
             <option value="before">作業前</option>
-            <option value="mid">作業中</option>
             <option value="after">作業後</option>
           </select>
         </div>
