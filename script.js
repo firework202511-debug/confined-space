@@ -8,7 +8,7 @@ const CONFIG = {
 // 常用照片（存 R2，可跨次帶出）
 const PERSISTENT_KEYS = ['signage', 'license1', 'license2', 'rescue'];
 
-// 上傳項目定義
+// 上傳項目定義（移除作業中）
 const UPLOAD_ITEMS = {
   before: [
     { k: 'kaohsiung',   label: '高市檢申報擷取畫面' },
@@ -19,12 +19,8 @@ const UPLOAD_ITEMS = {
     { k: 'gas',         label: '氣體偵測器' },
     { k: 'rescue',      label: '急救設備及空氣呼吸器',  persistent: true },
     { k: 'signage',     label: '作業場所告示牌',        persistent: true },
-    { k: 'license1',    label: '缺氧作業主管證照',      persistent: true },
-    { k: 'license2',    label: '急救人員證照',          persistent: true },
-  ],
-  mid: [
-    { k: 'cctv',       label: 'CCTV 監看螢幕畫面' },
-    { k: 'access_mid', label: '人員進出管制表' },
+    { k: 'license1',    label: '缺氧作業主管證照',      persistent: true, privacyNote: true },
+    { k: 'license2',    label: '急救人員證照',          persistent: true, privacyNote: true },
   ],
   after: [
     { k: 'access_after', label: '人員進出管制表' },
@@ -36,10 +32,8 @@ const UPLOAD_ITEMS = {
 const S = {
   dd: [],                // dropdown data
   files: {},             // before 圖片 { k: [File,...] }
-  filesMid: {},          // mid 圖片
   filesAfter: {},        // after 圖片
-  beforeFields: null,    // 作業前填寫的欄位（供作業中/後自動帶入）
-  midAutoFields: null,   // 從 Worker 查回的作業前記錄（作業中用）
+  beforeFields: null,    // 作業前填寫的欄位（供作業後自動帶入）
   afterAutoFields: null, // 從 Worker 查回的作業前記錄（作業後用）
   G_PDF_B64: '',         // 最後一次產生的 PDF base64
   lastBeforeRecord: null, // 上次作業前記錄（自動帶入用）
@@ -63,7 +57,6 @@ async function initApp() {
   }
   // 建立上傳格子
   buildUploadGrid('before');
-  buildUploadGrid('mid');
   buildUploadGrid('after');
 }
 
@@ -77,8 +70,8 @@ function getTodayDateString() {
 function fillAllCompanySelects() {
   const cos = [...new Set(S.dd.map(r => r.company))].sort();
 
-  // 作業前/中/後：加「其他」選項；查詢頁不加
-  ['beforeCompany', 'midCompany', 'afterCompany'].forEach(id => {
+  // 作業前/後：加「其他」選項；查詢頁不加
+  ['beforeCompany', 'afterCompany'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.innerHTML = '<option value="">— 請選擇公司 —</option>';
@@ -118,7 +111,7 @@ function onCompanyChange(phase) {
 
   const projs = [...new Set(S.dd.filter(r => r.company === co).map(r => r.project))].sort();
   projs.forEach(p => prjEl.add(new Option(p, p)));
-  prjEl.add(new Option('其他（手動輸入）', '__other__'));
+  if (phase === 'before') prjEl.add(new Option('其他（手動輸入）', '__other__'));
 
   // 作業前：同步部門課別
   if (phase === 'before') {
@@ -147,7 +140,7 @@ function onCompanyChange(phase) {
       fetchLastBeforeRecord(co, prj);
       updateProceedBtn('before');
     }
-    if (phase === 'mid' || phase === 'after') fetchBeforeRecord(phase);
+    if (phase === 'after') fetchBeforeRecord(phase);
   };
 }
 
@@ -157,7 +150,6 @@ function updateProceedBtn(phase) {
 
   let hasCompany, hasProject;
   if (coSel === '__other__') {
-    // 手動輸入：讀手動欄位
     hasCompany  = document.getElementById('manualCompany')?.value.trim();
     hasProject  = document.getElementById('manualProject')?.value.trim();
   } else if (prjSel === '__other__') {
@@ -175,7 +167,6 @@ function updateProceedBtn(phase) {
 async function fetchLastBeforeRecord(company, project) {
   if (!company || !project) return;
 
-  // 顯示查詢中提示
   const hintEl = document.getElementById('beforeLastHint');
   if (hintEl) {
     hintEl.textContent = '🔍 查詢上次記錄中...';
@@ -203,11 +194,15 @@ async function fetchLastBeforeRecord(company, project) {
     S.lastBeforeRecord = rec;
 
     // 帶入欄位（保留可編輯）
+    // ★ 不帶出 workDetail（詳細位置）：每日手動輸入
+    // ★ 不帶出 watchman（監視人員）：每日手動輸入
     setVal('beforeInspector', rec.inspector);
     setVal('beforeOxygen',    rec.oxygenSupervisor);
     setVal('beforePhone',     rec.phone);
     setVal('beforeArea',      rec.workArea);
-    setVal('beforeDetail',    rec.workDetail);
+    // beforeDetail 刻意不帶入
+    // beforeWatchman 刻意不帶入
+    setVal('beforeRescuer',   rec.rescuer); // 急救人員套用帶出邏輯
 
     // ★ 帶入常用照片預覽
     if (rec.persistentPhotos) {
@@ -236,7 +231,10 @@ async function fetchLastBeforeRecord(company, project) {
 
     if (hintEl) {
       const lastDate = (rec.uploadTime || rec.startTime || '').slice(0, 10);
-      hintEl.innerHTML = `✅ 已帶入上次記錄（${lastDate}），可直接修改各欄位`;
+      hintEl.innerHTML = `✅ 已帶入上次記錄（${lastDate}）<br>
+        <span style="font-size:.82em;color:#555;font-weight:400">
+          ※ 詳細位置與監視人員未帶入，請每日手動填寫
+        </span>`;
       hintEl.style.color = '#0f7b5a';
     }
 
@@ -265,9 +263,11 @@ async function goToUpload(phase) {
   const end       = val('beforeEnd');
   const area      = val('beforeArea');
   const detail    = val('beforeDetail');
+  const watchman  = val('beforeWatchman');
+  const rescuer   = val('beforeRescuer');
 
-  if (!inspector || !oxygen || !phone || !start || !end || !area || !detail) {
-    alert('請填寫所有必填欄位（姓名、主管、聯絡方式、時間、地點）');
+  if (!inspector || !oxygen || !phone || !start || !end || !area || !detail || !watchman || !rescuer) {
+    alert('請填寫所有必填欄位（姓名、主管、聯絡方式、監視人員、急救人員、時間、地點）');
     return;
   }
 
@@ -275,17 +275,14 @@ async function goToUpload(phase) {
   const coSel  = val('beforeCompany');
   const prjSel = val('beforeProject');
 
-  // 公司：__other__ → 讀手動欄位；否則用下拉值
   const company = (coSel === '__other__')
     ? val('manualCompany').trim()
     : coSel;
 
-  // 工程：下拉或手動欄位（公司是「其他」時工程也一律讀手動）
   const project = (coSel === '__other__' || prjSel === '__other__')
     ? val('manualProject').trim()
     : prjSel;
 
-  // 部門課別：「其他」時讀手動欄位，否則讀 beforeDept/beforeSection
   const dept    = (coSel === '__other__')
     ? val('manualDept').trim()
     : val('beforeDept');
@@ -304,7 +301,6 @@ async function goToUpload(phase) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company, project, dept, section })
       });
-      // 同步更新本地 dd
       if (!S.dd.some(r => r.company === company && r.project === project)) {
         S.dd.push({ company, project, dept, section });
         fillAllCompanySelects();
@@ -312,12 +308,13 @@ async function goToUpload(phase) {
     } catch(e) { console.warn('更新 DROPDOWNDATA 失敗:', e); }
   }
 
-  // 儲存到全域（供 PDF 及作業中/後使用）
+  // 儲存到全域（供 PDF 及作業後使用）
   S.beforeFields = {
     company, project, dept, section,
     inspector, oxygenSupervisor: oxygen, phone,
     startTime: start, endTime: end,
     workArea:  area,  workDetail: detail,
+    watchman, rescuer,
   };
 
   // 更新 Auto Info Box
@@ -325,6 +322,8 @@ async function goToUpload(phase) {
   document.getElementById('bai_project').textContent   = S.beforeFields.project;
   document.getElementById('bai_inspector').textContent = inspector;
   document.getElementById('bai_oxygen').textContent    = oxygen;
+  document.getElementById('bai_watchman').textContent  = watchman;
+  document.getElementById('bai_rescuer').textContent   = rescuer;
   document.getElementById('bai_area').textContent      = area;
   document.getElementById('bai_detail').textContent    = detail;
 
@@ -364,7 +363,7 @@ function stepReset(id) {
   if (num) num.textContent = num.dataset.num || '?';
 }
 
-// ================== 作業中/後 查詢作業前記錄 ==================
+// ================== 作業後 查詢作業前記錄 ==================
 async function fetchBeforeRecord(phase) {
   const company = val(phase + 'Company');
   const project = val(phase + 'Project');
@@ -394,7 +393,7 @@ async function fetchBeforeRecord(phase) {
     }
 
     const rec = data.record;
-    const prefix = phase === 'mid' ? 'mai_' : 'aai_';
+    const prefix = 'aai_';
 
     document.getElementById(prefix + 'inspector').textContent = rec.inspector        || '—';
     document.getElementById(prefix + 'oxygen').textContent    = rec.oxygenSupervisor || '—';
@@ -408,9 +407,7 @@ async function fetchBeforeRecord(phase) {
     submitBtn.disabled      = false;
     submitBtn.style.opacity = '1';
 
-    // 存到全域
-    if (phase === 'mid')   S.midAutoFields   = rec;
-    if (phase === 'after') S.afterAutoFields = rec;
+    S.afterAutoFields = rec;
 
   } catch (err) {
     console.error('查詢作業前記錄失敗:', err);
@@ -433,14 +430,17 @@ function buildUploadGrid(phase) {
       const badge = isPersistent
         ? `<span style="font-size:.6rem;background:#ebfaf4;color:#0f7b5a;border-radius:3px;padding:1px 5px;font-weight:700;border:1px solid #0f7b5a">可帶出</span>`
         : `<span style="font-size:.62rem;background:#fdf2f1;color:#c0392b;border-radius:3px;padding:1px 5px;font-weight:600;">必填</span>`;
+      const privacyNote = item.privacyNote
+        ? `<span style="font-size:.6rem;background:#fffbeb;color:#b45309;border-radius:3px;padding:1px 5px;font-weight:700;border:1px solid #f59e0b;margin-left:2px;">請事先遮蓋重要個資</span>`
+        : '';
       return `
       <div id="box_${phase}_${item.k}"
            style="border:1.5px dashed ${isPersistent ? '#0f7b5a' : '#ccc'};border-radius:10px;padding:14px;background:${isPersistent ? '#f0faf6' : '#f5f6f8'};"
            ondragover="event.preventDefault()" ondrop="onDrop(event,'${item.k}','${phase}')">
-        <div style="font-size:.78rem;font-weight:700;color:#555;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
-          <span style="width:19px;height:19px;border-radius:50%;background:${isPersistent ? '#0f7b5a' : '#2952c8'};color:#fff;font-size:.65rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;">${i+1}</span>
+        <div style="font-size:.78rem;font-weight:700;color:#555;margin-bottom:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span style="width:19px;height:19px;border-radius:50%;background:${isPersistent ? '#0f7b5a' : '#2952c8'};color:#fff;font-size:.65rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</span>
           ${item.label}
-          ${badge}
+          ${badge}${privacyNote}
         </div>
         <div style="border:1px dashed #ccc;border-radius:6px;padding:10px;text-align:center;cursor:pointer;background:#fff;"
              onclick="document.getElementById('fi_${phase}_${item.k}').click()">
@@ -460,7 +460,7 @@ function onDrop(e, k, phase) {
 }
 
 function onFile(k, fl, phase) {
-  const store = phase === 'before' ? S.files : (phase === 'mid' ? S.filesMid : S.filesAfter);
+  const store = phase === 'before' ? S.files : S.filesAfter;
   if (!store[k]) store[k] = [];
   Array.from(fl).forEach(f => store[k].push(f));
   renderPreviews(k, phase);
@@ -470,7 +470,7 @@ function onFile(k, fl, phase) {
 }
 
 function renderPreviews(k, phase) {
-  const store = phase === 'before' ? S.files : (phase === 'mid' ? S.filesMid : S.filesAfter);
+  const store = phase === 'before' ? S.files : S.filesAfter;
   const el = document.getElementById(`pv_${phase}_${k}`);
   if (!el) return;
   el.innerHTML = (store[k] || []).map((f, i) => `
@@ -482,7 +482,7 @@ function renderPreviews(k, phase) {
 }
 
 function rmFile(k, i, phase) {
-  const store = phase === 'before' ? S.files : (phase === 'mid' ? S.filesMid : S.filesAfter);
+  const store = phase === 'before' ? S.files : S.filesAfter;
   store[k].splice(i, 1);
   renderPreviews(k, phase);
   const box = document.getElementById(`box_${phase}_${k}`);
@@ -490,8 +490,6 @@ function rmFile(k, i, phase) {
 }
 
 // ================== 常用照片帶入預覽 ==================
-// 從 R2 URL 帶入常用照片的縮圖預覽（不需重新上傳就能使用）
-// 同時在背景 fetch 成 base64 緩存，避免 PDF 生成時的 CORS 問題
 function loadPersistentPreviews(photoUrls) {
   PERSISTENT_KEYS.forEach(k => {
     const url = photoUrls[k];
@@ -500,16 +498,12 @@ function loadPersistentPreviews(photoUrls) {
     const boxEl = document.getElementById(`box_before_${k}`);
     if (!pvEl) return;
 
-    // 若使用者已自行上傳新圖，不覆蓋
     if (S.files[k] && S.files[k].length > 0) return;
 
-    // 標記此格為「使用既有 R2 圖片」
     if (!S.persistentUrls[k]) S.persistentUrls[k] = url;
 
-    // ★ 建立 img 元素，載入完成後用 canvas 轉 base64 緩存
-    // 不走 fetch（有 CORS 問題），直接讓瀏覽器載圖再用 canvas 抽取像素
     const preImg = document.createElement('img');
-    preImg.crossOrigin = 'anonymous';  // 嘗試 CORS 模式
+    preImg.crossOrigin = 'anonymous';
     preImg.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
     document.body.appendChild(preImg);
     preImg.onload = () => {
@@ -521,7 +515,6 @@ function loadPersistentPreviews(photoUrls) {
         S.persistentB64[k] = cvs.toDataURL('image/jpeg', 0.85);
         console.log(`[persistentB64] 已緩存 ${k}`);
       } catch(e) {
-        // canvas 被 taint 汙染（CORS 限制）→ 改用 fetch 嘗試
         fetch(url, { mode: 'cors' })
           .then(r => r.blob())
           .then(blob => new Promise((res, rej) => {
@@ -540,7 +533,7 @@ function loadPersistentPreviews(photoUrls) {
       document.body.removeChild(preImg);
       console.warn(`preImg 載入失敗: ${k}`);
     };
-    preImg.src = url; // 觸發載入
+    preImg.src = url;
 
     pvEl.innerHTML = `
       <div style="position:relative;border-radius:6px;overflow:hidden;border:2px solid #0f7b5a;">
@@ -557,7 +550,6 @@ function loadPersistentPreviews(photoUrls) {
   });
 }
 
-// 使用者點 ✕ 清除帶入的常用照片（改為重新上傳）
 function clearPersistentPreview(k) {
   delete S.persistentUrls[k];
   const pvEl  = document.getElementById(`pv_before_${k}`);
@@ -567,7 +559,6 @@ function clearPersistentPreview(k) {
 }
 
 // ================== 圖片壓縮工具 ==================
-// 壓縮到 800px 寬、JPEG 0.65 品質後回傳 base64（不含 data: 前綴）
 async function compressImage(file, maxWidth = 800, quality = 0.65) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -585,7 +576,7 @@ async function compressImage(file, maxWidth = 800, quality = 0.65) {
         ctx.imageSmoothingQuality = 'medium';
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL('image/jpeg', quality);
-        resolve(dataUrl.split(',')[1]); // 只回傳 base64 本體
+        resolve(dataUrl.split(',')[1]);
       };
       img.src = e.target.result;
     };
@@ -596,10 +587,8 @@ async function compressImage(file, maxWidth = 800, quality = 0.65) {
 // ================== PDF 生成 + 上傳 ==================
 async function generateAndSubmit(phase) {
   const items = UPLOAD_ITEMS[phase];
-  const store = phase === 'before' ? S.files : (phase === 'mid' ? S.filesMid : S.filesAfter);
+  const store = phase === 'before' ? S.files : S.filesAfter;
 
-  // 檢查所有必填圖片
-  // 常用照片：新上傳 File 或已有既有 R2 URL，二者之一即可
   const missing = items.filter(it => {
     const hasNewFile = store[it.k] && store[it.k].length > 0;
     const hasPersistent = phase === 'before' && it.persistent && S.persistentUrls[it.k];
@@ -621,21 +610,18 @@ async function generateAndSubmit(phase) {
 
   try {
     const f    = getFieldsForPhase(phase);
-    const phLbl = { before:'作業前', mid:'作業中', after:'作業後' }[phase];
+    const phLbl = { before:'作業前', after:'作業後' }[phase];
 
     // ── Step 1（作業前）：先上傳常用照片到 R2 ─────
     if (phase === 'before') {
       msgEl.textContent = '☁️ 正在儲存常用照片...';
-      // 壓縮 4 張常用照片（有新上傳的才壓縮；沿用舊的傳 null）
       const persistentPayload = {};
       for (const k of PERSISTENT_KEYS) {
         if (S.files[k] && S.files[k].length > 0) {
-          // 有新圖片 → 壓縮後上傳，並緩存 base64 供本次 PDF 使用
           const b64 = await compressImage(S.files[k][0]);
           persistentPayload[k] = b64;
-          S.persistentB64[k]   = 'data:image/jpeg;base64,' + b64; // 緩存完整 dataURL
+          S.persistentB64[k]   = 'data:image/jpeg;base64,' + b64;
         } else {
-          // 沿用既有 R2 圖片 → 傳 null
           persistentPayload[k] = null;
         }
       }
@@ -646,7 +632,6 @@ async function generateAndSubmit(phase) {
       });
       if (!pRes.ok) throw new Error('常用照片上傳失敗');
       const pData = await pRes.json();
-      // 更新全域常用照片 URL（供 PDF 渲染使用）
       S.persistentUrls = pData.urls || {};
     }
 
@@ -655,7 +640,6 @@ async function generateAndSubmit(phase) {
     const pdfB64 = await generatePDF(phase, items, store);
     S.G_PDF_B64 = pdfB64;
 
-    // 顯示預覽按鈕（僅作業前）
     if (phase === 'before') {
       document.getElementById('beforePdfArea').classList.add('show');
     }
@@ -673,7 +657,7 @@ async function generateAndSubmit(phase) {
 
     // ── Step 4: 寫入 Google Sheets ────────────────
     msgEl.textContent = '📊 正在寫入 Google Sheets...';
-    const actionMap = { before: '/api/submit-before', mid: '/api/submit-mid', after: '/api/submit-after' };
+    const actionMap = { before: '/api/submit-before', after: '/api/submit-after' };
     const submitRes = await fetch(`${CONFIG.API_ENDPOINT}${actionMap[phase]}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -687,7 +671,6 @@ async function generateAndSubmit(phase) {
     msgEl.textContent = '✅ 通報成功！PDF 已儲存至雲端。';
     submitBtn.textContent = '✅ 已送出';
 
-    // 作業前完成後可繼續用於作業中/後
     if (phase === 'before') {
       stepDone('bStep2'); stepActive('bStep3');
       document.getElementById('bLine2').classList.add('ok');
@@ -705,22 +688,16 @@ async function generateAndSubmit(phase) {
 
 function getFieldsForPhase(phase) {
   if (phase === 'before') return S.beforeFields || {};
-  if (phase === 'mid')    return { ...(S.midAutoFields || {}),   company: val('midCompany'),   project: val('midProject') };
   if (phase === 'after')  return { ...(S.afterAutoFields || {}), company: val('afterCompany'), project: val('afterProject') };
   return {};
 }
 
 // ================== PDF 生成（逐元素排版，圖片不跨頁）==================
-// 策略：
-//   ① 基本資料表用 html2canvas 截成一塊 headerCanvas
-//   ② 每張照片各自截成獨立 imgCanvas
-//   ③ 放置每個 canvas 前先算剩餘頁高是否足夠，不夠就 addPage
-//   → 每個元素都完整，永遠不會被分頁裁斷
 async function generatePDF(phase, items, store) {
   const f       = getFieldsForPhase(phase);
-  const phLbl   = { before:'作業前', mid:'作業中', after:'作業後' }[phase];
-  const phColor = { before:'#2952c8', mid:'#6d28d9', after:'#0d7490' }[phase];
-  const phBg    = { before:'#eef2fc', mid:'#f5f3ff', after:'#ecfeff' }[phase];
+  const phLbl   = { before:'作業前', after:'作業後' }[phase];
+  const phColor = { before:'#2952c8', after:'#0d7490' }[phase];
+  const phBg    = { before:'#eef2fc', after:'#ecfeff' }[phase];
   const TH = 'border:1px solid #cbd5e1;padding:7px 9px;background:#f8fafc;color:#334155;width:20%;vertical-align:top;font-size:11px';
   const TD = 'border:1px solid #cbd5e1;padding:7px 9px;vertical-align:top;font-size:11px';
   const W  = 750; // 渲染寬度 px
@@ -735,7 +712,6 @@ async function generatePDF(phase, items, store) {
       tick();
     });
     if (S.persistentB64[k]) return S.persistentB64[k];
-    // 最後手段：直接 fetch
     try {
       const res  = await fetch(S.persistentUrls[k]);
       const blob = await res.blob();
@@ -768,7 +744,6 @@ async function generatePDF(phase, items, store) {
   async function elToCanvas(el) {
     el.style.cssText = `position:fixed;left:0;top:0;width:${W}px;z-index:-9999;background:#fff;box-sizing:border-box;`;
     document.body.appendChild(el);
-    // 等待 img 載入
     await Promise.all(Array.from(el.querySelectorAll('img')).map(img =>
       img.complete ? Promise.resolve() : new Promise(r => { img.onload = img.onerror = r; })
     ));
@@ -778,9 +753,14 @@ async function generatePDF(phase, items, store) {
   }
 
   // ── Step 2: 截圖「基本資料」表頭 ──────────────────────────────
+  // 作業前多顯示監視人員、急救人員欄位
   const headerEl = document.createElement('div');
   headerEl.style.fontFamily = 'Arial,sans-serif';
   headerEl.style.padding    = '24px 30px 10px';
+
+  const beforeExtraRows = phase === 'before' ? `
+      <tr><th style="${TH}">監視人員</th><td style="${TD}">${f.watchman||'—'}</td><th style="${TH}">急救人員</th><td style="${TD}">${f.rescuer||'—'}</td></tr>` : '';
+
   headerEl.innerHTML = `
     <div style="text-align:center;margin-bottom:16px;border-bottom:3px solid ${phColor};padding-bottom:10px">
       <div style="font-size:20px;font-weight:700;color:#1d3d9e">局限空間作業通報書</div>
@@ -796,18 +776,17 @@ async function generatePDF(phase, items, store) {
       <tr><th style="${TH}">聯絡方式</th><td style="${TD}">${f.phone||'—'}</td><th style="${TH}">上傳時機</th><td style="${TD};font-weight:700;color:${phColor}">${phLbl}通報</td></tr>
       <tr><th style="${TH}">開始時間</th><td style="${TD}">${(f.startTime||'').replace('T',' ')}</td><th style="${TH}">結束時間</th><td style="${TD}">${(f.endTime||'').replace('T',' ')}</td></tr>
       <tr><th style="${TH}">作業區域</th><td style="${TD}">${f.workArea||'—'}</td><th style="${TH}">詳細位置</th><td style="${TD}">${f.workDetail||'—'}</td></tr>
+      ${beforeExtraRows}
     </table>
     <div style="background:#eef2fc;font-weight:700;color:#2952c8;padding:5px 10px;border-left:4px solid #2952c8;font-size:12px">查核照片與附件（${phLbl}）</div>`;
   const headerCanvas = await elToCanvas(headerEl);
 
   // ── Step 3: 每個項目各自截圖 ──────────────────────────────────
-  // 每張圖片獨立成一個 canvas，放入 PDF 時先判斷空間是否足夠
-  const itemCanvases = []; // { canvas, isEmpty }
+  const itemCanvases = [];
 
   for (const item of items) {
     const srcs = imgMap[item.k] || [];
     if (srcs.length === 0) {
-      // 無圖片：截一個帶標籤的空格子
       const el = document.createElement('div');
       el.style.fontFamily = 'Arial,sans-serif';
       el.style.padding    = '0 30px';
@@ -836,9 +815,8 @@ async function generatePDF(phase, items, store) {
   const { jsPDF } = window.jspdf;
   const pdf    = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
   const A4_W   = 210, A4_H = 297, MARGIN = 8;
-  const PW_MM  = A4_W - MARGIN * 2; // 可用寬度 mm
+  const PW_MM  = A4_W - MARGIN * 2;
 
-  // canvas → mm 高度（依 canvas 實際寬高比換算）
   function canvasHeightMm(c) {
     const cssW = c.width  / 2;
     const cssH = c.height / 2;
@@ -849,13 +827,12 @@ async function generatePDF(phase, items, store) {
 
   function place(c) {
     const mmH = canvasHeightMm(c);
-    // 空間不足 → 換頁
     if (curY + mmH > A4_H - MARGIN) {
       pdf.addPage();
       curY = MARGIN;
     }
     pdf.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', MARGIN, curY, PW_MM, mmH);
-    curY += mmH + 3; // 3mm 間距
+    curY += mmH + 3;
   }
 
   place(headerCanvas);
@@ -865,8 +842,6 @@ async function generatePDF(phase, items, store) {
 
   return pdf.output('datauristring').split(',')[1];
 }
-
-
 
 function fileToDataUrl(file) {
   return new Promise(res => {
@@ -918,7 +893,6 @@ async function searchRecords() {
 
     const phaseInfo = {
       before: { label:'作業前', cls:'badge-before' },
-      mid:    { label:'作業中', cls:'badge-mid' },
       after:  { label:'作業後', cls:'badge-after' },
     };
 
