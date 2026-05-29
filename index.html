@@ -363,14 +363,7 @@
         <div class="row">
           <div class="form-group">
             <label>作業區域 *</label>
-            <select id="beforeArea">
-              <option value="">— 請選擇作業區域 —</option>
-              <option value="汽力機組">汽力機組</option>
-              <option value="複循環機組">複循環機組</option>
-              <option value="煤場區域">煤場區域</option>
-              <option value="新複循環廠區">新複循環廠區</option>
-              <option value="其他區域">其他區域（請於詳細地點註明）</option>
-            </select>
+            <input type="text" id="beforeArea" placeholder="例：廠區 A 棟">
           </div>
           <div class="form-group">
             <label>詳細位置 *</label>
@@ -514,6 +507,11 @@
       </button>
       <div id="afterLoading" class="loading">⏳ 處理中，請稍候...</div>
       <div id="afterMsg" class="status"></div>
+
+      <div id="afterPdfArea" class="pdf-preview-area">
+        <p style="color:#0f7b5a;font-weight:600;margin-bottom:8px">✅ PDF 已產生</p>
+        <button class="btn-preview" onclick="previewPDF()">👁 預覽 PDF</button>
+      </div>
     </div>
 
     <!-- ══════════════════ 查詢 ══════════════════ -->
