@@ -5,8 +5,8 @@ const CONFIG = {
   MAX_PDF_SIZE_MB: 10,
 };
 
-// 常用照片（存 R2，可跨次帶出）— 僅保留兩張證照，告示牌與防護具每次重新上傳
-const PERSISTENT_KEYS = ['license1', 'license2'];
+// 常用照片（存 R2，可跨次帶出）
+const PERSISTENT_KEYS = ['signage', 'license1', 'license2', 'rescue'];
 
 // 上傳項目定義（移除作業中）
 const UPLOAD_ITEMS = {
@@ -17,14 +17,13 @@ const UPLOAD_ITEMS = {
     { k: 'checklist2',  label: '作業前作業安全檢核表' },
     { k: 'ventilation', label: '通風設備' },
     { k: 'gas',         label: '氣體偵測器' },
-    { k: 'rescue',      label: '急救設備及空氣呼吸器' },           // 移除 persistent，每次重新上傳
-    { k: 'signage',     label: '作業場所告示牌' },                 // 移除 persistent，每次重新上傳
+    { k: 'rescue',      label: '急救設備及空氣呼吸器',  persistent: true },
+    { k: 'signage',     label: '作業場所告示牌',        persistent: true },
     { k: 'license1',    label: '缺氧作業主管證照',      persistent: true, privacyNote: true },
     { k: 'license2',    label: '急救人員證照',          persistent: true, privacyNote: true },
   ],
   after: [
     { k: 'access_after', label: '人員進出管制表' },
-    { k: 'gas_record',   label: '氣體濃度測定紀錄表' },
     { k: 'site_end',     label: '現場結束後狀況' },
   ],
 };
@@ -38,7 +37,7 @@ const S = {
   afterAutoFields: null, // 從 Worker 查回的作業前記錄（作業後用）
   G_PDF_B64: '',         // 最後一次產生的 PDF base64
   lastBeforeRecord: null, // 上次作業前記錄（自動帶入用）
-  persistentUrls: {},    // 常用照片的現有 R2 URL { license1, license2 }
+  persistentUrls: {},    // 常用照片的現有 R2 URL { signage, license1, license2, rescue }
   persistentB64:  {},    // 常用照片的 base64（本次上傳或 fetch 後緩存，優先用於 PDF）
 };
 
@@ -200,7 +199,7 @@ async function fetchLastBeforeRecord(company, project) {
     setVal('beforeInspector', rec.inspector);
     setVal('beforeOxygen',    rec.oxygenSupervisor);
     setVal('beforePhone',     rec.phone);
-    setSelect('beforeArea',   rec.workArea);   // 作業區域為下拉選單，用 setSelect
+    setVal('beforeArea',      rec.workArea);
     // beforeDetail 刻意不帶入
     // beforeWatchman 刻意不帶入
     setVal('beforeRescuer',   rec.rescuer); // 急救人員套用帶出邏輯
@@ -252,14 +251,6 @@ async function fetchLastBeforeRecord(company, project) {
 function setVal(id, val) {
   const el = document.getElementById(id);
   if (el && val !== undefined && val !== null) el.value = val;
-}
-
-// 下拉選單專用：若選項存在則選中，否則保持預設
-function setSelect(id, val) {
-  const el = document.getElementById(id);
-  if (!el || val === undefined || val === null) return;
-  const opt = Array.from(el.options).find(o => o.value === val);
-  if (opt) el.value = val;
 }
 
 // ================== 子頁面切換 ==================
@@ -327,16 +318,13 @@ async function goToUpload(phase) {
   };
 
   // 更新 Auto Info Box
-  // beforeArea 為下拉選單，取 option 的顯示文字（去除尾部說明）供摘要欄顯示
-  const areaEl = document.getElementById('beforeArea');
-  const areaText = areaEl ? (areaEl.options[areaEl.selectedIndex]?.text || area) : area;
   document.getElementById('bai_company').textContent   = S.beforeFields.company;
   document.getElementById('bai_project').textContent   = S.beforeFields.project;
   document.getElementById('bai_inspector').textContent = inspector;
   document.getElementById('bai_oxygen').textContent    = oxygen;
   document.getElementById('bai_watchman').textContent  = watchman;
   document.getElementById('bai_rescuer').textContent   = rescuer;
-  document.getElementById('bai_area').textContent      = areaText;
+  document.getElementById('bai_area').textContent      = area;
   document.getElementById('bai_detail').textContent    = detail;
 
   // 切換子頁面
@@ -624,9 +612,9 @@ async function generateAndSubmit(phase) {
     const f    = getFieldsForPhase(phase);
     const phLbl = { before:'作業前', after:'作業後' }[phase];
 
-    // ── Step 1（作業前）：先上傳常用照片到 R2（僅兩張證照）─────
+    // ── Step 1（作業前）：先上傳常用照片到 R2 ─────
     if (phase === 'before') {
-      msgEl.textContent = '☁️ 正在儲存證照照片...';
+      msgEl.textContent = '☁️ 正在儲存常用照片...';
       const persistentPayload = {};
       for (const k of PERSISTENT_KEYS) {
         if (S.files[k] && S.files[k].length > 0) {
@@ -654,6 +642,9 @@ async function generateAndSubmit(phase) {
 
     if (phase === 'before') {
       document.getElementById('beforePdfArea').classList.add('show');
+    }
+    if (phase === 'after') {
+      document.getElementById('afterPdfArea').classList.add('show');
     }
 
     // ── Step 3: 上傳 PDF 至 R2 ────────────────────
@@ -770,8 +761,9 @@ async function generatePDF(phase, items, store) {
   headerEl.style.fontFamily = 'Arial,sans-serif';
   headerEl.style.padding    = '24px 30px 10px';
 
-  const beforeExtraRows = phase === 'before' ? `
-      <tr><th style="${TH}">監視人員</th><td style="${TD}">${f.watchman||'—'}</td><th style="${TH}">急救人員</th><td style="${TD}">${f.rescuer||'—'}</td></tr>` : '';
+  // 監視人員與急救人員：作業前/後皆顯示（作業後從 afterAutoFields 帶入）
+  const extraRows = `
+      <tr><th style="${TH}">監視人員</th><td style="${TD}">${f.watchman||'—'}</td><th style="${TH}">急救人員</th><td style="${TD}">${f.rescuer||'—'}</td></tr>`;
 
   headerEl.innerHTML = `
     <div style="text-align:center;margin-bottom:16px;border-bottom:3px solid ${phColor};padding-bottom:10px">
@@ -788,7 +780,7 @@ async function generatePDF(phase, items, store) {
       <tr><th style="${TH}">聯絡方式</th><td style="${TD}">${f.phone||'—'}</td><th style="${TH}">上傳時機</th><td style="${TD};font-weight:700;color:${phColor}">${phLbl}通報</td></tr>
       <tr><th style="${TH}">開始時間</th><td style="${TD}">${(f.startTime||'').replace('T',' ')}</td><th style="${TH}">結束時間</th><td style="${TD}">${(f.endTime||'').replace('T',' ')}</td></tr>
       <tr><th style="${TH}">作業區域</th><td style="${TD}">${f.workArea||'—'}</td><th style="${TH}">詳細位置</th><td style="${TD}">${f.workDetail||'—'}</td></tr>
-      ${beforeExtraRows}
+      ${extraRows}
     </table>
     <div style="background:#eef2fc;font-weight:700;color:#2952c8;padding:5px 10px;border-left:4px solid #2952c8;font-size:12px">查核照片與附件（${phLbl}）</div>`;
   const headerCanvas = await elToCanvas(headerEl);
