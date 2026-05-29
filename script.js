@@ -398,6 +398,8 @@ async function fetchBeforeRecord(phase) {
     document.getElementById(prefix + 'inspector').textContent = rec.inspector        || '—';
     document.getElementById(prefix + 'oxygen').textContent    = rec.oxygenSupervisor || '—';
     document.getElementById(prefix + 'phone').textContent     = rec.phone             || '—';
+    document.getElementById(prefix + 'watchman').textContent  = rec.watchman          || '—';
+    document.getElementById(prefix + 'rescuer').textContent   = rec.rescuer           || '—';
     document.getElementById(prefix + 'area').textContent      = rec.workArea          || '—';
     document.getElementById(prefix + 'detail').textContent    = rec.workDetail        || '—';
     document.getElementById(prefix + 'start').textContent     = (rec.startTime || '').replace('T', ' ');
